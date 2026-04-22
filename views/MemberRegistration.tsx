@@ -1,0 +1,740 @@
+
+import React, { useState, useEffect } from 'react';
+import { User, MemberProfile, ChildProfile } from '../types';
+import { Icons, COLORS } from '../constants';
+
+interface MemberRegistrationProps {
+  user: User;
+  onComplete: (profile: MemberProfile) => void;
+}
+
+type Step = 'type' | 'parent' | 'teenager' | 'children' | 'consent';
+
+export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, onComplete }) => {
+  const [step, setStep] = useState<Step>('type');
+  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | null>(null);
+  
+  // Parent / Common Info
+  const [parentInfo, setParentInfo] = useState({
+    familyName: '',
+    address: '',
+    parentEmail: '',
+    parentMobile: '',
+    livingWith: '',
+  });
+
+  // Teenager Info
+  const [teenagerInfo, setTeenagerInfo] = useState({
+    name: user.name || '',
+    dob: '',
+    age: 0,
+    ownMobile: '',
+    ownEmail: user.email || '',
+    schoolCollege: '',
+    dietaryAllergies: '',
+    medicalConditions: '',
+    medication: '',
+    canSwim: false,
+    swimDistance: '',
+    parentName: '',
+    parentMobile: '',
+    medicalConsent: false,
+    mediaConsent: false,
+  });
+
+  // Children Info (for Family mode)
+  const [children, setChildren] = useState<ChildProfile[]>([]);
+  const [currentChild, setCurrentChild] = useState<Partial<ChildProfile>>({
+    name: '',
+    dob: '',
+    age: 0,
+    address: '',
+    ownMobile: '',
+    ownEmail: '',
+    schoolCollege: '',
+    dietaryAllergies: '',
+    medicalConditions: '',
+    medication: '',
+    canSwim: false,
+    swimDistance: '',
+    medicalConsent: false,
+    mediaConsent: false,
+    collectionPermissions: ['', '', '', '', ''],
+  });
+
+  const [dataConsent, setDataConsent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Age calculation helper
+  const calculateAge = (dob: string) => {
+    if (!dob) return 0;
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  useEffect(() => {
+    if (teenagerInfo.dob) {
+      setTeenagerInfo(prev => ({ ...prev, age: calculateAge(prev.dob) }));
+    }
+  }, [teenagerInfo.dob]);
+
+  useEffect(() => {
+    if (currentChild.dob) {
+      setCurrentChild(prev => ({ ...prev, age: calculateAge(prev.dob || '') }));
+    }
+  }, [currentChild.dob]);
+
+  const handleAddChild = () => {
+    setError(null);
+    if (!currentChild.name || !currentChild.dob) {
+      setError("Please enter at least the child's name and date of birth.");
+      return;
+    }
+    
+    const newChild: ChildProfile = {
+      ...(currentChild as ChildProfile),
+      collectionPermissions: currentChild.collectionPermissions?.filter(name => name.trim() !== '') || []
+    };
+    
+    setChildren([...children, newChild]);
+    setCurrentChild({
+      name: '',
+      dob: '',
+      age: 0,
+      address: '',
+      ownMobile: '',
+      ownEmail: '',
+      schoolCollege: '',
+      dietaryAllergies: '',
+      medicalConditions: '',
+      medication: '',
+      canSwim: false,
+      swimDistance: '',
+      medicalConsent: false,
+      mediaConsent: false,
+      collectionPermissions: ['', '', '', '', ''],
+    });
+  };
+
+  const handleRemoveChild = (index: number) => {
+    setChildren(children.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    
+    if (registrationType === 'teenager') {
+      onComplete({
+        registrationType: 'teenager',
+        address: parentInfo.address,
+        parentEmail: parentInfo.parentEmail,
+        parentMobile: parentInfo.parentMobile,
+        livingWith: parentInfo.livingWith,
+        teenagerDetails: teenagerInfo,
+        dataConsent
+      });
+    } else {
+      if (children.length === 0) {
+        setError("Please add at least one child to your family registration.");
+        return;
+      }
+      onComplete({
+        registrationType: 'family',
+        familyName: parentInfo.familyName,
+        address: parentInfo.address,
+        parentEmail: parentInfo.parentEmail,
+        parentMobile: parentInfo.parentMobile,
+        livingWith: parentInfo.livingWith,
+        children,
+        dataConsent
+      });
+    }
+  };
+
+  const SectionTitle = ({ icon, title }: { icon: React.ReactNode, title: string }) => (
+    <div className="flex items-center gap-3 mb-6 pb-2 border-b border-gray-100">
+      <div style={{ color: COLORS.primary }}>{icon}</div>
+      <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold uppercase tracking-widest brand-heading">{title}</h3>
+    </div>
+  );
+
+  const InputLabel = ({ children }: { children: React.ReactNode }) => (
+    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 brand-heading">{children}</label>
+  );
+
+  const renderStep = () => {
+    switch (step) {
+      case 'type':
+        return (
+          <div className="space-y-8 animate-fadeIn">
+            <div className="text-center mb-12">
+              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-widest mb-4">Welcome to free@last</h2>
+              <p className="text-gray-500">How would you like to register today?</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <button 
+                onClick={() => { setRegistrationType('family'); setStep('parent'); }}
+                className="group p-10 bg-white border-4 border-gray-100 rounded-[3rem] hover:border-brand-orange transition-all text-left shadow-xl hover:shadow-2xl active:scale-95"
+              >
+                <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mb-6 text-brand-orange group-hover:scale-110 transition-transform">
+                  <Icons.User />
+                </div>
+                <h3 className="text-2xl font-bold brand-heading uppercase mb-2">Family Registration</h3>
+                <p className="text-gray-500 text-sm leading-relaxed">Register yourself as a parent and add your children who will be visiting the centre.</p>
+              </button>
+              <button 
+                onClick={() => { setRegistrationType('teenager'); setStep('parent'); }}
+                className="group p-10 bg-white border-4 border-gray-100 rounded-[3rem] hover:border-brand-light-blue transition-all text-left shadow-xl hover:shadow-2xl active:scale-95"
+              >
+                <div className="w-16 h-16 bg-sky-100 rounded-2xl flex items-center justify-center mb-6 text-brand-light-blue group-hover:scale-110 transition-transform">
+                  <Icons.Activity />
+                </div>
+                <h3 className="text-2xl font-bold brand-heading uppercase mb-2">Teenager (15+)</h3>
+                <p className="text-gray-500 text-sm leading-relaxed">Register yourself as an individual member (for those aged 15 and over).</p>
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'parent':
+        return (
+          <div className="space-y-8 animate-fadeIn">
+            <SectionTitle icon={<Icons.User />} title={registrationType === 'family' ? "Family & Parent Info" : "Parent/Guardian Contact"} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {registrationType === 'family' && (
+                <div className="md:col-span-2">
+                  <InputLabel>Family Name</InputLabel>
+                  <input 
+                    type="text" required
+                    className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                    value={parentInfo.familyName}
+                    onChange={e => setParentInfo({...parentInfo, familyName: e.target.value})}
+                    placeholder="e.g. The Smith Family"
+                  />
+                </div>
+              )}
+              <div className="md:col-span-2">
+                <InputLabel>Home Address</InputLabel>
+                <textarea 
+                  required rows={2}
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                  value={parentInfo.address}
+                  onChange={e => setParentInfo({...parentInfo, address: e.target.value})}
+                />
+              </div>
+              <div>
+                <InputLabel>Parent/Guardian Email</InputLabel>
+                <input 
+                  type="email" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.parentEmail}
+                  onChange={e => setParentInfo({...parentInfo, parentEmail: e.target.value})}
+                />
+              </div>
+              <div>
+                <InputLabel>Parent/Guardian Mobile</InputLabel>
+                <input 
+                  type="tel" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.parentMobile}
+                  onChange={e => setParentInfo({...parentInfo, parentMobile: e.target.value})}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <InputLabel>Who lives in the house? (e.g. Parents, Siblings, Grandparents)</InputLabel>
+                <input 
+                  type="text" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.livingWith}
+                  onChange={e => setParentInfo({...parentInfo, livingWith: e.target.value})}
+                />
+              </div>
+            </div>
+            <div className="flex justify-between pt-8">
+              <button type="button" onClick={() => setStep('type')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
+              <button 
+                type="button" 
+                onClick={() => setStep(registrationType === 'family' ? 'children' : 'teenager')}
+                style={{ backgroundColor: COLORS.secondary }}
+                className="text-white px-12 py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+              >
+                Next Step
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'teenager':
+        return (
+          <div className="space-y-8 animate-fadeIn">
+            <SectionTitle icon={<Icons.Activity />} title="Personal Details" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <InputLabel>Full Name</InputLabel>
+                <input 
+                  type="text" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={teenagerInfo.name}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, name: e.target.value})}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <InputLabel>Date of Birth</InputLabel>
+                  <input 
+                    type="date" required
+                    className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                    value={teenagerInfo.dob}
+                    onChange={e => setTeenagerInfo({...teenagerInfo, dob: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <InputLabel>Age</InputLabel>
+                  <input 
+                    type="number" readOnly
+                    className="w-full p-4 bg-gray-100 border-2 border-gray-100 rounded-xl outline-none font-bold text-gray-500"
+                    value={teenagerInfo.age}
+                  />
+                </div>
+              </div>
+              <div>
+                <InputLabel>Your Mobile Number</InputLabel>
+                <input 
+                  type="tel" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={teenagerInfo.ownMobile}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, ownMobile: e.target.value})}
+                />
+              </div>
+              <div>
+                <InputLabel>Your Email</InputLabel>
+                <input 
+                  type="email" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={teenagerInfo.ownEmail}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, ownEmail: e.target.value})}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <InputLabel>School / College / Employment</InputLabel>
+                <input 
+                  type="text" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={teenagerInfo.schoolCollege}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, schoolCollege: e.target.value})}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <InputLabel>Dietary Requirements & Allergies</InputLabel>
+                <textarea 
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                  value={teenagerInfo.dietaryAllergies}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, dietaryAllergies: e.target.value})}
+                />
+              </div>
+              <div>
+                <InputLabel>Medical Conditions</InputLabel>
+                <textarea 
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                  value={teenagerInfo.medicalConditions}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, medicalConditions: e.target.value})}
+                />
+              </div>
+              <div>
+                <InputLabel>Current Medication</InputLabel>
+                <textarea 
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                  value={teenagerInfo.medication}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, medication: e.target.value})}
+                />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    className="w-6 h-6 accent-brand-orange"
+                    checked={teenagerInfo.canSwim}
+                    onChange={e => setTeenagerInfo({...teenagerInfo, canSwim: e.target.checked})}
+                  />
+                  <span className="text-sm font-bold text-brand-dark-blue brand-heading">Can you swim?</span>
+                </label>
+                {teenagerInfo.canSwim && (
+                  <input 
+                    type="text"
+                    placeholder="How far? (e.g. 25m)"
+                    className="flex-1 p-3 bg-gray-50 border-2 border-gray-100 rounded-xl outline-none text-sm"
+                    value={teenagerInfo.swimDistance}
+                    onChange={e => setTeenagerInfo({...teenagerInfo, swimDistance: e.target.value})}
+                  />
+                )}
+              </div>
+            </div>
+
+            {teenagerInfo.age < 18 && (
+              <div className="bg-orange-50 p-8 rounded-[2rem] border border-orange-100 space-y-6">
+                <h4 className="text-brand-orange font-bold brand-heading uppercase tracking-widest text-sm">Parental Consent (Required for under 18s)</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <InputLabel>Parent Name</InputLabel>
+                    <input 
+                      type="text" required
+                      className="w-full p-4 bg-white border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={teenagerInfo.parentName}
+                      onChange={e => setTeenagerInfo({...teenagerInfo, parentName: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Parent Mobile</InputLabel>
+                    <input 
+                      type="tel" required
+                      className="w-full p-4 bg-white border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={teenagerInfo.parentMobile}
+                      onChange={e => setTeenagerInfo({...teenagerInfo, parentMobile: e.target.value})}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <label className="flex items-start gap-4 p-4 bg-white rounded-2xl border border-gray-100 cursor-pointer">
+                    <input 
+                      type="checkbox" required
+                      className="mt-1 w-5 h-5 accent-brand-orange"
+                      checked={teenagerInfo.medicalConsent}
+                      onChange={e => setTeenagerInfo({...teenagerInfo, medicalConsent: e.target.checked})}
+                    />
+                    <span className="text-sm text-gray-600 leading-relaxed font-light">
+                      I give permission for any necessary medical intervention by the emergency services if required.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-4 p-4 bg-white rounded-2xl border border-gray-100 cursor-pointer">
+                    <input 
+                      type="checkbox"
+                      className="mt-1 w-5 h-5 accent-brand-orange"
+                      checked={teenagerInfo.mediaConsent}
+                      onChange={e => setTeenagerInfo({...teenagerInfo, mediaConsent: e.target.checked})}
+                    />
+                    <span className="text-sm text-gray-600 leading-relaxed font-light">
+                      I give consent for free@last to use photographs or video footage for publicity and social media.
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between pt-8">
+              <button type="button" onClick={() => setStep('parent')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
+              <button 
+                type="button" 
+                onClick={() => setStep('consent')}
+                style={{ backgroundColor: COLORS.secondary }}
+                className="text-white px-12 py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+              >
+                Next Step
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'children':
+        return (
+          <div className="space-y-12 animate-fadeIn">
+            <div>
+              <SectionTitle icon={<Icons.Plus />} title="Add Family Members" />
+              <p className="text-gray-500 mb-8">Please add details for each child who will be attending the centre.</p>
+              
+              {/* List of added children */}
+              {children.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-12">
+                  {children.map((child, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                      <div>
+                        <h4 className="font-bold text-brand-dark-blue brand-heading uppercase">{child.name}</h4>
+                        <p className="text-xs text-gray-400">Age: {child.age} • {child.schoolCollege}</p>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveChild(idx)}
+                        className="text-red-400 hover:text-red-600 p-2"
+                      >
+                        <Icons.LogOut />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add Child Form */}
+              <div className="bg-white border-4 border-dashed border-gray-100 p-8 rounded-[2rem] space-y-8">
+                <h4 className="text-lg font-bold brand-heading uppercase tracking-widest text-gray-400">New Child Details</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <InputLabel>Child's Name</InputLabel>
+                    <input 
+                      type="text"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.name}
+                      onChange={e => setCurrentChild({...currentChild, name: e.target.value})}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <InputLabel>Date of Birth</InputLabel>
+                      <input 
+                        type="date"
+                        className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                        value={currentChild.dob}
+                        onChange={e => setCurrentChild({...currentChild, dob: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <InputLabel>Age</InputLabel>
+                      <input 
+                        type="number" readOnly
+                        className="w-full p-4 bg-gray-100 border-2 border-gray-100 rounded-xl outline-none font-bold text-gray-500"
+                        value={currentChild.age}
+                      />
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <InputLabel>Address (Leave blank if same as family address)</InputLabel>
+                    <input 
+                      type="text"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.address}
+                      onChange={e => setCurrentChild({...currentChild, address: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Child's Mobile (Optional)</InputLabel>
+                    <input 
+                      type="tel"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.ownMobile}
+                      onChange={e => setCurrentChild({...currentChild, ownMobile: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Child's Email (Optional)</InputLabel>
+                    <input 
+                      type="email"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.ownEmail}
+                      onChange={e => setCurrentChild({...currentChild, ownEmail: e.target.value})}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <InputLabel>School / College</InputLabel>
+                    <input 
+                      type="text"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.schoolCollege}
+                      onChange={e => setCurrentChild({...currentChild, schoolCollege: e.target.value})}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <InputLabel>Dietary Requirements & Allergies</InputLabel>
+                    <textarea 
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                      value={currentChild.dietaryAllergies}
+                      onChange={e => setCurrentChild({...currentChild, dietaryAllergies: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Medical Conditions</InputLabel>
+                    <textarea 
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                      value={currentChild.medicalConditions}
+                      onChange={e => setCurrentChild({...currentChild, medicalConditions: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Current Medication</InputLabel>
+                    <textarea 
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
+                      value={currentChild.medication}
+                      onChange={e => setCurrentChild({...currentChild, medication: e.target.value})}
+                    />
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        className="w-6 h-6 accent-brand-orange"
+                        checked={currentChild.canSwim}
+                        onChange={e => setCurrentChild({...currentChild, canSwim: e.target.checked})}
+                      />
+                      <span className="text-sm font-bold text-brand-dark-blue brand-heading">Can they swim?</span>
+                    </label>
+                    {currentChild.canSwim && (
+                      <input 
+                        type="text"
+                        placeholder="How far? (e.g. 25m)"
+                        className="flex-1 p-3 bg-gray-50 border-2 border-gray-100 rounded-xl outline-none text-sm"
+                        value={currentChild.swimDistance}
+                        onChange={e => setCurrentChild({...currentChild, swimDistance: e.target.value})}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <h4 className="text-brand-dark-blue font-bold brand-heading uppercase tracking-widest text-sm">Permissions & Collection</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="flex items-start gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        className="mt-1 w-5 h-5 accent-brand-orange"
+                        checked={currentChild.medicalConsent}
+                        onChange={e => setCurrentChild({...currentChild, medicalConsent: e.target.checked})}
+                      />
+                      <span className="text-sm text-gray-600 leading-relaxed font-light">
+                        Permission for medical intervention by emergency services.
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        className="mt-1 w-5 h-5 accent-brand-orange"
+                        checked={currentChild.mediaConsent}
+                        onChange={e => setCurrentChild({...currentChild, mediaConsent: e.target.checked})}
+                      />
+                      <span className="text-sm text-gray-600 leading-relaxed font-light">
+                        Consent for use of photos and videos by free@last.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="space-y-4">
+                    <InputLabel>Adults permitted to collect this child (Up to 5 names)</InputLabel>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {currentChild.collectionPermissions?.map((name, idx) => (
+                        <input 
+                          key={idx}
+                          type="text"
+                          placeholder={`Adult ${idx + 1}`}
+                          className="p-3 bg-gray-50 border-2 border-gray-100 rounded-xl outline-none text-sm font-bold"
+                          value={name}
+                          onChange={e => {
+                            const newPerms = [...(currentChild.collectionPermissions || [])];
+                            newPerms[idx] = e.target.value;
+                            setCurrentChild({...currentChild, collectionPermissions: newPerms});
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={handleAddChild}
+                  style={{ backgroundColor: COLORS.green }}
+                  className="w-full text-white py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+                >
+                  Add Child to Family
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between pt-8">
+              <button type="button" onClick={() => setStep('parent')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setError(null);
+                  if (children.length === 0) {
+                    setError("Please add at least one child.");
+                    return;
+                  }
+                  setStep('consent');
+                }}
+                style={{ backgroundColor: COLORS.secondary }}
+                className="text-white px-12 py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+              >
+                Next Step
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'consent':
+        return (
+          <div className="space-y-8 animate-fadeIn">
+            <SectionTitle icon={<Icons.Shield />} title="Final Consent" />
+            <div className="bg-slate-50 p-10 rounded-[3rem] border border-slate-100 space-y-8">
+              <div className="space-y-4">
+                <label className="flex items-start gap-4 p-6 bg-white rounded-3xl border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors shadow-sm">
+                  <input 
+                    type="checkbox" required
+                    className="mt-1 w-6 h-6 accent-brand-orange"
+                    checked={dataConsent}
+                    onChange={e => setDataConsent(e.target.checked)}
+                  />
+                  <span className="text-sm text-gray-600 leading-relaxed font-light">
+                    <strong className="block text-brand-dark-blue brand-heading uppercase text-xs mb-1">Data Protection & GDPR</strong>
+                    I agree to free@last holding this personal data securely in accordance with their privacy policy and GDPR regulations. I understand that this information is used to ensure the safety and wellbeing of all members.
+                  </span>
+                </label>
+              </div>
+
+              <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100">
+                <p className="text-xs text-blue-700 leading-relaxed">
+                  By completing this registration, you are joining the free@last community. We look forward to seeing you at the centre! If you have any questions about how we use your data, please speak to a member of the team.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-between pt-8">
+              <button type="button" onClick={() => setStep(registrationType === 'family' ? 'children' : 'teenager')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
+              <button 
+                type="submit"
+                style={{ backgroundColor: COLORS.orange }}
+                className="text-white px-16 py-6 rounded-2xl font-bold text-xl shadow-2xl hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+              >
+                Complete Registration
+              </button>
+            </div>
+          </div>
+        );
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-16">
+      <div className="bg-white rounded-[3rem] shadow-2xl overflow-hidden border border-gray-100">
+        <div style={{ backgroundColor: COLORS.secondary }} className="p-10 text-white text-center relative">
+          <div className="absolute top-6 left-10 opacity-20">
+            <Icons.Logo reversed className="h-6" />
+          </div>
+          <h1 className="text-4xl font-bold brand-heading uppercase tracking-widest mb-2">Member Registration</h1>
+          <div className="flex justify-center gap-2 mt-4">
+            {(['type', 'parent', registrationType === 'family' ? 'children' : 'teenager', 'consent'] as Step[]).map((s, idx) => (
+              <div 
+                key={s} 
+                className={`h-1.5 rounded-full transition-all duration-500 ${
+                  step === s ? 'w-8 bg-brand-orange' : 'w-4 bg-white/20'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-10">
+          {error && (
+            <div className="mb-8 p-4 bg-red-50 border-2 border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-shake">
+              <span className="text-xl">⚠️</span>
+              <p className="font-bold brand-heading uppercase text-xs tracking-widest">{error}</p>
+            </div>
+          )}
+          {renderStep()}
+        </form>
+      </div>
+    </div>
+  );
+};

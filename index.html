@@ -1,0 +1,53 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>free@last Community Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dosis:wght@700;800&family=Roboto+Slab:wght@300;400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --brand-green: #85c441;
+      --brand-orange: #f47920;
+      --brand-light-blue: #00aeef;
+      --brand-dark-blue: #2b337e;
+      --brand-yellow: #ffd600;
+    }
+    body { 
+      font-family: 'Roboto Slab', serif; 
+      background-color: #f8fafc;
+    }
+    h1, h2, h3, h4, h5, h6, .brand-heading { 
+      font-family: 'Dosis', sans-serif; 
+    }
+    .bg-brand-orange { background-color: var(--brand-orange); }
+    .text-brand-orange { color: var(--brand-orange); }
+    .bg-brand-dark-blue { background-color: var(--brand-dark-blue); }
+    .text-brand-dark-blue { color: var(--brand-dark-blue); }
+    .bg-brand-green { background-color: var(--brand-green); }
+    .text-brand-green { color: var(--brand-green); }
+    .bg-brand-light-blue { background-color: var(--brand-light-blue); }
+    .text-brand-light-blue { color: var(--brand-light-blue); }
+    .bg-brand-yellow { background-color: var(--brand-yellow); }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="text-gray-900">
+  <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

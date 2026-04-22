@@ -1,0 +1,168 @@
+{
+  "entities": {
+    "announcement": {
+      "title": "Announcement",
+      "description": "A news update or announcement for the centre.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "author": { "type": "string" },
+        "category": { "type": "string" }
+      },
+      "required": ["title", "content", "date", "author", "category"]
+    },
+    "activity": {
+      "title": "Activity",
+      "description": "A session or activity scheduled at the centre.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "time": { "type": "string" },
+        "location": { "type": "string" },
+        "capacity": { "type": "number" },
+        "bookedCount": { "type": "number" },
+        "category": { "type": "string", "enum": ["youth", "community", "sports", "education"] },
+        "flickrAlbumUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["upcoming", "past"] },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["title", "description", "date", "time", "location", "capacity", "bookedCount", "category", "status"]
+    },
+    "asset": {
+      "title": "Asset",
+      "description": "A brand image or UI asset.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["value"]
+    },
+    "partner": {
+      "title": "Partner",
+      "description": "A trusted partner organization.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "logo": { "type": "string" },
+        "description": { "type": "string" },
+        "details": { "type": "string" },
+        "website": { "type": "string" },
+        "stats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "value": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["name", "logo", "description"]
+    },
+    "impactStory": {
+      "title": "Impact Story",
+      "description": "A news update or story about a partnership.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "partnerName": { "type": "string" },
+        "image": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["title", "content", "partnerName"]
+    },
+    "inquiry": {
+      "title": "Inquiry",
+      "description": "A contact inquiry from the website.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "timestamp": { "type": "string", "description": "Server timestamp" },
+        "status": { "type": "string" }
+      },
+      "required": ["name", "mobile", "message"]
+    },
+    "booking": {
+      "title": "Booking",
+      "description": "A registration record for an activity session.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookerName": { "type": "string" },
+        "participantName": { "type": "string" },
+        "bookerMobile": { "type": "string" },
+        "bookingDate": { "type": "string", "description": "Server timestamp" },
+        "sessionTitle": { "type": "string" },
+        "sessionDate": { "type": "string" },
+        "sessionTime": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["bookerName", "participantName", "bookerMobile", "sessionId"]
+    },
+    "user": {
+      "title": "User",
+      "description": "A system user (admin, team, or member) with approval status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "team", "member"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "department": { "type": "string" },
+        "profileComplete": { "type": "boolean" }
+      },
+      "required": ["email", "role", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "Collection of system users and their approval status."
+    },
+    "/announcements/{announcementId}": {
+      "schema": "announcement",
+      "description": "Collection of centre updates."
+    },
+    "/activities/{activityId}": {
+      "schema": "activity",
+      "description": "Collection of session activities."
+    },
+    "/assets/{assetId}": {
+      "schema": "asset",
+      "description": "Collection of brand images and assets."
+    },
+    "/partners/{partnerId}": {
+      "schema": "partner",
+      "description": "Collection of trusted partners."
+    },
+    "/impact_stories/{storyId}": {
+      "schema": "impactStory",
+      "description": "Collection of partner impact stories."
+    },
+    "/inquiries/{inquiryId}": {
+      "schema": "inquiry",
+      "description": "Collection of user inquiries."
+    },
+    "/bookings/{bookingId}": {
+      "schema": "booking",
+      "description": "Collection of activity bookings."
+    }
+  }
+}
