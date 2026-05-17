@@ -14,16 +14,16 @@ export const PhotoPolicyModal: React.FC<PhotoPolicyModalProps> = ({ onConfirm })
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-brand-dark-blue/80 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-white rounded-[3rem] shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-100 animate-slideIn">
-        <div style={{ backgroundColor: COLORS.secondary }} className="p-10 text-white text-center relative">
-          <div className="absolute top-6 left-10 opacity-20">
+      <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] shadow-2xl max-w-2xl w-full max-h-[95vh] overflow-y-auto border border-slate-100 animate-slideIn">
+        <div style={{ backgroundColor: COLORS.secondary }} className="p-6 md:p-10 text-white text-center relative sticky top-0 z-10 shadow-md">
+          <div className="absolute top-4 md:top-6 left-6 md:left-10 opacity-20 hidden md:block">
             <Icons.Shield />
           </div>
-          <h2 className="text-3xl font-bold brand-heading uppercase tracking-widest mb-2">Photo Usage Policy</h2>
-          <p className="text-white/70 text-sm font-light">Please confirm your agreement to access community photos.</p>
+          <h2 className="text-2xl md:text-3xl font-bold brand-heading uppercase tracking-widest mb-1 md:mb-2">Photo Usage Policy</h2>
+          <p className="text-white/70 text-xs md:text-sm font-light">Please confirm your agreement to access community photos.</p>
         </div>
 
-        <div className="p-10 space-y-8">
+        <div className="p-6 md:p-10 space-y-6 md:space-y-8">
           <div className="bg-slate-50 p-8 rounded-3xl border border-slate-100 space-y-6">
             <div className="flex items-start gap-4">
               <div style={{ color: COLORS.orange }} className="mt-1"><Icons.Shield /></div>

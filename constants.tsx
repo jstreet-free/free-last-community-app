@@ -173,7 +173,8 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 25,
     bookedCount: 18,
     category: 'youth',
-    status: 'upcoming'
+    status: 'upcoming',
+    frequency: 'weekly'
   },
   {
     id: '2',
@@ -185,7 +186,8 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 15,
     bookedCount: 12,
     category: 'sports',
-    status: 'upcoming'
+    status: 'upcoming',
+    frequency: 'weekly'
   },
   {
     id: '3',
@@ -197,7 +199,8 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 10,
     bookedCount: 4,
     category: 'education',
-    status: 'upcoming'
+    status: 'upcoming',
+    frequency: 'weekly'
   },
   {
     id: '4',
@@ -209,7 +212,8 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 40,
     bookedCount: 32,
     category: 'community',
-    status: 'upcoming'
+    status: 'upcoming',
+    frequency: 'weekly'
   },
   {
     id: 'p1',
@@ -235,6 +239,19 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     bookedCount: 20,
     category: 'sports',
     flickrAlbumUrl: 'https://www.flickr.com/photos/tags/adventure',
+    status: 'past'
+  },
+  {
+    id: 'p3',
+    title: 'Fishing 2026 Expedition',
+    description: 'Our early spring fishing trip where young people learned patience and environmental stewardship.',
+    date: '2026-03-10',
+    time: '07:00',
+    location: 'Lakeside Centre',
+    capacity: 12,
+    bookedCount: 12,
+    category: 'sports',
+    flickrAlbumUrl: 'https://www.flickr.com/photos/tags/fishing',
     status: 'past'
   }
 ];
@@ -296,6 +313,12 @@ export const Icons = {
   ),
   MapPin: () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+  ),
+  Eye: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+  ),
+  EyeOff: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
   ),
   Stethoscope: () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.8 2.3A.3.3 0 1 0 5 2a.3.3 0 0 0-.2.3Z"/><path d="M10 2a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-4Z"/><path d="M8 10v10a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V10"/><path d="M12 12v5"/></svg>

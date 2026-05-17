@@ -5,42 +5,82 @@ import { User, Announcement } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../services/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
 
 interface HomeProps {
   user: User | null;
   assets: any;
   announcements: Announcement[];
+  setActiveTab: (tab: string) => void;
 }
 
-export const Home: React.FC<HomeProps> = ({ user, assets, announcements }) => {
+export const Home: React.FC<HomeProps> = ({ user, assets, announcements, setActiveTab }) => {
   const [showInquiryModal, setShowInquiryModal] = useState(false);
+  const [showAllNews, setShowAllNews] = useState(false);
   const [inquiryForm, setInquiryForm] = useState({
     name: '',
+    email: '',
     mobile: '',
     message: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleInquirySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setErrorMessage(null);
+    const path = 'inquiries';
     try {
-      await addDoc(collection(db, 'inquiries'), {
+      // 1. Save to inquiries collection for database record
+      await addDoc(collection(db, path), {
         ...inquiryForm,
         type: 'Get Involved',
         timestamp: serverTimestamp(),
-        status: 'new'
+        status: 'new',
+        targetEmail: 'jstreet@freeatlast.co.uk'
       });
+
+      // 2. Trigger actual email via 'mail' collection
+      await addDoc(collection(db, 'mail'), {
+        to: ['jstreet@freeatlast.co.uk'],
+        replyTo: inquiryForm.email,
+        message: {
+          subject: `New Get Involved Inquiry from ${inquiryForm.name}`,
+          text: `Name: ${inquiryForm.name}\nEmail: ${inquiryForm.email}\nMobile: ${inquiryForm.mobile}\nMessage: ${inquiryForm.message}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+              <h2 style="color: #2b337e;">New "Get Involved" Inquiry</h2>
+              <p>Someone has reached out via the free@last Community Hub portal.</p>
+              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+              <p><strong>Name:</strong> ${inquiryForm.name}</p>
+              <p><strong>Email:</strong> ${inquiryForm.email}</p>
+              <p><strong>Mobile:</strong> ${inquiryForm.mobile}</p>
+              <div style="background: #f4792010; border-left: 4px solid #f47920; padding: 15px; margin: 20px 0;">
+                <p style="margin: 0; color: #444; line-height: 1.6;">${inquiryForm.message}</p>
+              </div>
+              <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                Sent via free@last Community Hub Digital Platform
+              </p>
+            </div>
+          `
+        }
+      });
+
       setIsSuccess(true);
       setTimeout(() => {
         setShowInquiryModal(false);
         setIsSuccess(false);
-        setInquiryForm({ name: '', mobile: '', message: '' });
-      }, 2500);
+        setInquiryForm({ name: '', email: '', mobile: '', message: '' });
+      }, 5000);
     } catch (error) {
-      console.error("Error submitting inquiry:", error);
-      alert("Something went wrong. Please try again or email us directly at info@freeatlast.co.uk");
+      setErrorMessage("Something went wrong. Please try again or email us directly at jstreet@freeatlast.co.uk");
+      try {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      } catch (err) {
+        console.error("Firestore Error logged:", err);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -125,14 +165,20 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements }) => {
       </section>
 
       {/* Centre Updates */}
-      <section style={{ backgroundColor: COLORS.secondary }} className="py-24 text-white">
+      <section id="updates" style={{ backgroundColor: COLORS.secondary }} className="py-24 text-white">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between items-end mb-16 border-b border-white/10 pb-8">
             <h2 className="text-4xl font-bold brand-heading uppercase tracking-widest">Centre Updates</h2>
-            <button style={{ color: COLORS.lightBlue }} className="font-bold uppercase tracking-widest text-xs brand-heading hover:text-white transition-colors">View All News</button>
+            <button 
+              onClick={() => setActiveTab('activities')}
+              style={{ color: COLORS.lightBlue }} 
+              className="font-bold uppercase tracking-widest text-xs brand-heading hover:text-white transition-colors"
+            >
+              View All Events
+            </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {announcements.map((item) => (
+            {announcements.slice(0, 2).map((item) => (
               <div key={item.id} className="bg-white/5 p-10 rounded-2xl border border-white/10 hover:bg-white/10 transition-all group">
                 <div className="flex justify-between items-start mb-6">
                   <span className="text-[9px] font-bold uppercase tracking-[0.2em] px-3 py-1 bg-white/10 rounded-lg text-white/60 brand-heading">{item.category}</span>
@@ -143,8 +189,65 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements }) => {
               </div>
             ))}
           </div>
+          <div className="mt-8 flex justify-center">
+             <button 
+                onClick={() => setShowAllNews(true)}
+                className="text-[10px] font-black tracking-widest text-white/40 hover:text-white uppercase brand-heading transition-colors"
+             >
+                View News Archive
+             </button>
+          </div>
         </div>
       </section>
+
+      {/* All News Modal */}
+      <AnimatePresence>
+        {showAllNews && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAllNews(false)}
+              className="absolute inset-0 bg-brand-dark-blue/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              className="relative w-full max-w-4xl bg-white rounded-[3rem] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+            >
+              <div style={{ backgroundColor: COLORS.secondary }} className="p-10 text-white flex justify-between items-center shrink-0">
+                <h3 className="text-2xl font-black brand-heading uppercase tracking-widest leading-none">Complete Feed</h3>
+                <button 
+                  onClick={() => setShowAllNews(false)}
+                  className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-8 md:p-12 overflow-y-auto space-y-8">
+                {announcements.map((item) => (
+                  <div key={item.id} className="p-8 bg-slate-50 rounded-3xl border border-slate-100 group">
+                    <div className="flex justify-between items-start mb-4">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-brand-orange brand-heading">{item.category}</span>
+                      <span className="text-[10px] font-bold text-slate-400 brand-heading">{new Date(item.date).toLocaleDateString()}</span>
+                    </div>
+                    <h4 style={{ color: COLORS.secondary }} className="text-xl font-bold mb-3 brand-heading uppercase leading-tight">{item.title}</h4>
+                    <p className="text-slate-500 text-sm font-light leading-relaxed">{item.content}</p>
+                  </div>
+                ))}
+                {announcements.length === 0 && (
+                  <div className="text-center py-20">
+                    <Icons.Megaphone className="h-16 w-16 text-slate-200 mx-auto mb-6" />
+                    <p className="text-slate-400 font-bold brand-heading uppercase tracking-widest">No updates found yet.</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Safe Space Section */}
       <section className="py-24 px-4 max-w-7xl mx-auto">
@@ -219,6 +322,11 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements }) => {
                   </motion.div>
                 ) : (
                   <form onSubmit={handleInquirySubmit} className="space-y-6">
+                    {errorMessage && (
+                      <div className="p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 text-sm font-medium animate-shake">
+                        {errorMessage}
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Full Name</label>
                       <input 
@@ -228,6 +336,17 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements }) => {
                         onChange={(e) => setInquiryForm({...inquiryForm, name: e.target.value})}
                         className="w-full px-6 py-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-orange outline-none transition-all"
                         placeholder="Your name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Email Address</label>
+                      <input 
+                        required
+                        type="email"
+                        value={inquiryForm.email}
+                        onChange={(e) => setInquiryForm({...inquiryForm, email: e.target.value})}
+                        className="w-full px-6 py-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-orange outline-none transition-all"
+                        placeholder="Your email address"
                       />
                     </div>
                     <div className="space-y-2">

@@ -11,18 +11,23 @@ import { Partners } from './views/Partners';
 import { AdminAssets } from './views/AdminAssets';
 import { TeamRegistration } from './views/TeamRegistration';
 import { PhotoPolicyModal } from './components/PhotoPolicyModal';
-import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking } from './types';
+import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
 import { db, auth } from './services/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc, where, increment } from 'firebase/firestore';
 import { 
   signInAnonymously, 
   signOut, 
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  onAuthStateChanged 
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  setPersistence,
+  browserLocalPersistence
 } from 'firebase/auth';
+
+import { handleFirestoreError, OperationType } from './services/firestoreUtils';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -40,13 +45,29 @@ const App: React.FC = () => {
 
   // Auth State Listener
   useEffect(() => {
+    // Ensure persistence is set to local
+    setPersistence(auth, browserLocalPersistence);
+    
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         // Sync with Firestore
         const userRef = doc(db, 'users', firebaseUser.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
-          const userData = { ...userSnap.data(), id: firebaseUser.uid } as User;
+          let userData = { ...userSnap.data(), id: firebaseUser.uid } as User;
+          
+          // Force admin status for owner
+          if (firebaseUser.email?.toLowerCase() === 'jstreet@freeatlast.st' && (userData.role !== 'admin' || !userData.profileComplete)) {
+            userData = { ...userData, role: 'admin', profileComplete: true, status: 'approved' };
+            await updateDoc(userRef, { role: 'admin', profileComplete: true, status: 'approved' });
+          }
+
+          // Ensure team members with profiles are marked as complete
+          if (userData.role === 'team' && userData.name && !userData.profileComplete) {
+            userData.profileComplete = true;
+            await updateDoc(userRef, { profileComplete: true });
+          }
+          
           setUser(userData);
           localStorage.setItem('freeatlast_v2_user', JSON.stringify(userData));
         }
@@ -60,7 +81,9 @@ const App: React.FC = () => {
 
   const [bookings, setBookings] = useState<string[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
-  const [hasConfirmedPhotoPolicy, setHasConfirmedPhotoPolicy] = useState(false);
+  const [hasConfirmedPhotoPolicy, setHasConfirmedPhotoPolicy] = useState(() => {
+    return localStorage.getItem('freeatlast_photo_policy_confirmed') === 'true';
+  });
   
   const [assets, setAssets] = useState(DEFAULT_IMAGES);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -69,7 +92,11 @@ const App: React.FC = () => {
   const [impactStories, setImpactStories] = useState<ImpactStory[]>([]);
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [sessionRegistrations, setSessionRegistrations] = useState<Booking[]>([]);
+  const [userRegistrations, setUserRegistrations] = useState<Booking[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [teamLogs, setTeamLogs] = useState<TeamLog[]>([]);
+  const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
+  const [mailLogs, setMailLogs] = useState<MailLog[]>([]);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Persist user and tab
@@ -156,8 +183,12 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Sync all session registrations from Firestore
+  // Sync all session registrations from Firestore (Admin only)
   useEffect(() => {
+    if (user?.role !== 'admin') {
+      setSessionRegistrations([]);
+      return;
+    }
     const unsubscribe = onSnapshot(query(collection(db, 'bookings'), orderBy('bookingDate', 'desc')), (snapshot) => {
       const items: Booking[] = [];
       snapshot.forEach((doc) => {
@@ -166,7 +197,29 @@ const App: React.FC = () => {
       setSessionRegistrations(items);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user?.role]);
+
+  // Sync current user's personal bookings (for highlight UI and recurring logic)
+  useEffect(() => {
+    if (!user?.id) {
+      setBookings([]);
+      setUserRegistrations([]);
+      return;
+    }
+    const q = query(collection(db, 'bookings'), where('userId', '==', user.id));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ids: string[] = [];
+      const fullBookings: Booking[] = [];
+      snapshot.forEach(doc => {
+        const data = { id: doc.id, ...doc.data() } as Booking;
+        ids.push(data.sessionId);
+        fullBookings.push(data);
+      });
+      setBookings(ids);
+      setUserRegistrations(fullBookings);
+    });
+    return () => unsubscribe();
+  }, [user?.id]);
 
   // Sync users from Firestore (Admin only)
   useEffect(() => {
@@ -181,22 +234,95 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [user?.role]);
 
+  // Sync team logs from Firestore
+  useEffect(() => {
+    if (!user) {
+      setTeamLogs([]);
+      return;
+    }
+    
+    // Admins see all logs, Team members only see their own
+    // Removed orderBy to avoid index requirements; sorting client-side
+    let q = query(collection(db, 'team_logs'));
+    if (user.role !== 'admin') {
+      q = query(collection(db, 'team_logs'), where('teamMemberId', '==', user.id));
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: TeamLog[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as TeamLog);
+      });
+      // Sort client-side by date desc
+      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setTeamLogs(items);
+    }, (error) => {
+      console.error("Team logs sync error:", error);
+      if (error.message.includes('index')) {
+        setNotification("System update: Some data might be slow to load while indexes are building.");
+      }
+    });
+    return () => unsubscribe();
+  }, [user?.role, user?.id]);
+
+  // Sync gallery albums from Firestore
+  useEffect(() => {
+    const q = query(collection(db, 'gallery_albums'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: GalleryAlbum[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as GalleryAlbum);
+      });
+      setGalleryAlbums(items);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Sync current user specifically to handle real-time approval
   useEffect(() => {
     if (!user?.id) return;
     const unsubscribe = onSnapshot(doc(db, 'users', user.id), (snapshot) => {
       if (snapshot.exists()) {
         const updatedData = snapshot.data() as User;
-        // Only update if something meaningful changed or they were approved
-        if (updatedData.status === 'approved' && user.status === 'pending') {
+        
+        // Deep check for changes to prevent redundant re-renders
+        const hasStatusChange = updatedData.status !== user.status;
+        const hasRoleChange = updatedData.role !== user.role;
+        const hasApproval = updatedData.status === 'approved' && user.status === 'pending';
+
+        if (hasApproval) {
           setNotification("Welcome aboard! Your team access has been approved.");
           setActiveTab('home');
         }
-        setUser({ ...updatedData, id: snapshot.id });
+
+        // Only update if something meaningful changed to prevent remounting sub-components
+        const currentDataStr = JSON.stringify({ ...user, id: undefined });
+        const newDataStr = JSON.stringify({ ...updatedData, id: undefined });
+        
+        if (currentDataStr !== newDataStr) {
+          setUser({ ...updatedData, id: snapshot.id });
+        }
       }
     });
     return () => unsubscribe();
   }, [user?.id, user?.status]);
+
+  // Sync mail logs from Firestore (Admin only)
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      setMailLogs([]);
+      return;
+    }
+    const q = query(collection(db, 'mail'), orderBy('message.subject', 'desc')); 
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: MailLog[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as MailLog);
+      });
+      setMailLogs(items);
+    });
+    return () => unsubscribe();
+  }, [user?.role]);
 
   const handleUpdateAsset = async (key: string, newValue: string) => {
     try {
@@ -219,6 +345,26 @@ const App: React.FC = () => {
   const handleResetAssets = () => {
     if (window.confirm("Are you sure you want to reset all images to stock photos?")) {
       setAssets(DEFAULT_IMAGES);
+    }
+  };
+
+  const handleForgotPassword = async (email: string) => {
+    if (!email || email.length < 3) {
+      setNotification("Please enter your username or email above first so we know where to send the link.");
+      return;
+    }
+    
+    let finalEmail = email.trim();
+    if (!finalEmail.includes('@')) {
+      finalEmail = `${finalEmail.toLowerCase().replace(/\s/g, '')}@freeatlast.hub`;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, finalEmail);
+      setNotification(`Password reset email sent to ${finalEmail}. Check your inbox!`);
+    } catch (error: any) {
+      console.error("Reset error:", error);
+      setNotification("Failed to send reset email. Ensure the email is correct.");
     }
   };
 
@@ -261,7 +407,11 @@ const App: React.FC = () => {
         let updatedRole = userData.role;
         let updatedStatus = userData.status;
         
-        if (isSignUp) {
+        // Special case for owner email
+        if (email?.toLowerCase() === 'jstreet@freeatlast.st') {
+          updatedRole = 'admin';
+          updatedStatus = 'approved';
+        } else if (isSignUp) {
            if (role === 'admin' && userData.role !== 'admin') {
              updatedRole = 'admin';
              updatedStatus = 'approved';
@@ -269,13 +419,15 @@ const App: React.FC = () => {
              updatedRole = 'team';
              updatedStatus = 'pending';
            }
+        }
            
-           if (updatedRole !== userData.role) {
-             await updateDoc(userRef, { role: updatedRole, status: updatedStatus });
-           }
+        if (updatedRole !== userData.role || updatedStatus !== userData.status || (updatedRole === 'admin' && !userData.profileComplete)) {
+          const updates: any = { role: updatedRole, status: updatedStatus };
+          if (updatedRole === 'admin') updates.profileComplete = true;
+          await updateDoc(userRef, updates);
         }
 
-        const finalUser = { ...userData, id: uid, role: updatedRole, status: updatedStatus };
+        const finalUser = { ...userData, id: uid, role: updatedRole, status: updatedStatus, profileComplete: updatedRole === 'admin' ? true : userData.profileComplete };
         setUser(finalUser);
         localStorage.setItem('freeatlast_v2_user', JSON.stringify(finalUser));
         
@@ -285,24 +437,28 @@ const App: React.FC = () => {
         else setActiveTab(userData.profileComplete ? 'home' : 'registration');
       } else {
         // New user creation
+        const isOwner = email?.toLowerCase() === 'jstreet@freeatlast.st';
+        const finalRole = isOwner ? 'admin' : role;
+        const finalStatus = isOwner ? 'approved' : (finalRole === 'admin' ? 'approved' : 'pending');
+
         const newUser: User = {
           id: uid,
-          name: role === 'admin' ? 'Admin User' : '',
-          email: email || `${role}@freeatlast.hub`,
-          role: role,
-          profileComplete: role === 'admin',
-          status: role === 'admin' ? 'approved' : 'pending'
+          name: isOwner ? 'James Street' : (finalRole === 'admin' ? 'Admin User' : ''),
+          email: email || `${finalRole}@freeatlast.hub`,
+          role: finalRole,
+          profileComplete: finalRole === 'admin',
+          status: finalStatus
         };
         await setDoc(userRef, newUser);
         setUser(newUser);
         
-        setActiveTab(role === 'admin' ? 'assets' : 'registration');
+        setActiveTab(finalRole === 'admin' ? 'assets' : 'registration');
       }
     } catch (error: any) {
       console.error("Auth error details:", error);
       let msg = "";
       if (error.code === 'permission-denied') msg = "Database access denied. Please contact support.";
-      else if (error.code === 'auth/wrong-password') msg = "Incorrect password.";
+      else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') msg = "Incorrect password or email.";
       else if (error.code === 'auth/user-not-found') msg = "No account found. Please Sign Up first.";
       else if (error.code === 'auth/invalid-email') msg = "Invalid format.";
       else if (error.code === 'auth/weak-password') msg = "Password too short (6+ chars).";
@@ -320,7 +476,11 @@ const App: React.FC = () => {
     try {
       const userRef = doc(db, 'users', user.id);
       const isTeam = user.role === 'team';
-      const name = isTeam ? (profile as any).name : (profile.registrationType === 'family' ? profile.familyName : profile.teenagerDetails.name);
+      const name = isTeam 
+        ? (profile as any).name 
+        : (profile.registrationType === 'family' 
+            ? (profile.parentName || profile.familyName) 
+            : (profile.registrationType === 'teenager' ? profile.teenagerDetails.name : profile.parentName));
 
       // Preserve status if already approved
       const newStatus = user.status === 'approved' ? 'approved' : (isTeam ? 'pending' : 'approved');
@@ -352,9 +512,16 @@ const App: React.FC = () => {
   const handleBookActivity = async (detail: { participantName: string; bookerMobile: string; activity: Activity }) => {
     if (!user) return;
     
+    // Explicitly check photo policy for members/team
+    if (!hasConfirmedPhotoPolicy && (user.role === 'member' || user.role === 'team')) {
+      setNotification("Please acknowledge the photo policy before booking.");
+      return;
+    }
+    
+    const path = 'bookings';
     try {
       // 1. Save to global bookings collection for admin log
-      await addDoc(collection(db, 'bookings'), {
+      await addDoc(collection(db, path), {
         bookerName: user.name,
         participantName: detail.participantName,
         bookerMobile: detail.bookerMobile,
@@ -363,24 +530,55 @@ const App: React.FC = () => {
         sessionDate: detail.activity.date,
         sessionTime: detail.activity.time,
         sessionId: detail.activity.id,
-        userId: user.id
+        userId: user.id,
+        targetEmail: 'jstreet@freeatlast.co.uk'
       });
 
-      // 2. Increment activity count
+      // 2. Trigger email for the booking
+      await addDoc(collection(db, 'mail'), {
+        to: ['jstreet@freeatlast.co.uk'],
+        replyTo: user.email,
+        message: {
+          subject: `New Booking: ${detail.activity.title}`,
+          text: `Booking for ${detail.activity.title}\nParticipant: ${detail.participantName}\nDate: ${detail.activity.date}\nTime: ${detail.activity.time}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+              <h2 style="color: #2b337e;">New Activity Booking</h2>
+              <p>A new registration has been received for <strong>${detail.activity.title}</strong>.</p>
+              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+              <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                <p style="margin: 5px 0;"><strong>Session:</strong> ${detail.activity.title}</p>
+                <p style="margin: 5px 0;"><strong>Session Date:</strong> ${detail.activity.date}</p>
+                <p style="margin: 5px 0;"><strong>Session Time:</strong> ${detail.activity.time}</p>
+                <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${detail.participantName}</p>
+                <p style="margin: 5px 0;"><strong>Booked By:</strong> ${user.name}</p>
+                <p style="margin: 5px 0;"><strong>Mobile:</strong> ${detail.bookerMobile}</p>
+                <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+              </div>
+              <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                System generated booking alert
+              </p>
+            </div>
+          `
+        }
+      });
+
+      // 3. Increment activity count
       const activityRef = doc(db, 'activities', detail.activity.id);
       await updateDoc(activityRef, {
-        bookedCount: (detail.activity.bookedCount || 0) + 1
+        bookedCount: increment(1)
       });
-
-      // 3. Update local user bookings state
-      if (!bookings.includes(detail.activity.id)) {
-        setBookings([...bookings, detail.activity.id]);
-        setNotification(`Registration successful for ${detail.participantName}!`);
-        setTimeout(() => setNotification(null), 3000);
-      }
-    } catch (error) {
+      
+      setNotification(`Registration successful for ${detail.participantName}!`);
+      setTimeout(() => setNotification(null), 3000);
+    } catch (error: any) {
       console.error("Booking error:", error);
-      alert("Failed to confirm booking. Please check your connection.");
+      setNotification(`Booking failed: ${error.message || "Please check your connection"}`);
+      try {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      } catch (err) {
+        console.error("Firestore Error logged:", err);
+      }
     }
   };
 
@@ -388,8 +586,10 @@ const App: React.FC = () => {
     const [mode, setMode] = useState<'signin' | 'signup'>('signin');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [role, setRole] = useState<UserRole>('member');
     const [teamPasscode, setTeamPasscode] = useState('');
+    const [showPasscode, setShowPasscode] = useState(false);
 
     const onSubmit = (e: React.FormEvent) => {
       e.preventDefault();
@@ -469,17 +669,35 @@ const App: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Password</label>
+              <div className="flex justify-between items-center px-2">
+                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Password</label>
+                {mode === 'signin' && (
+                  <button 
+                    type="button"
+                    onClick={() => handleForgotPassword(email)}
+                    className="text-[9px] font-bold text-brand-orange hover:underline uppercase tracking-widest brand-heading"
+                  >
+                    Forgot Password?
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"><Icons.Key /></span>
                 <input 
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   placeholder="••••••••"
-                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 transition-all placeholder:text-slate-300"
+                  className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 transition-all placeholder:text-slate-300"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                 />
+                <button 
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
+                >
+                  {showPassword ? <Icons.EyeOff /> : <Icons.Eye />}
+                </button>
               </div>
             </div>
 
@@ -488,14 +706,23 @@ const App: React.FC = () => {
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">
                   {role === 'admin' ? 'Admin Access Code' : 'Team Access Code'}
                 </label>
-                <input 
-                  type="password"
-                  required
-                  placeholder={`Enter ${role} code`}
-                  className="w-full px-6 py-4 bg-orange-50 border-2 border-orange-100 rounded-2xl focus:border-brand-orange outline-none font-bold text-brand-dark-blue transition-all"
-                  value={teamPasscode}
-                  onChange={e => setTeamPasscode(e.target.value)}
-                />
+                <div className="relative">
+                  <input 
+                    type={showPasscode ? 'text' : 'password'}
+                    required
+                    placeholder={`Enter ${role} code`}
+                    className="w-full px-6 pr-12 py-4 bg-orange-50 border-2 border-orange-100 rounded-2xl focus:border-brand-orange outline-none font-bold text-brand-dark-blue transition-all"
+                    value={teamPasscode}
+                    onChange={e => setTeamPasscode(e.target.value)}
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowPasscode(!showPasscode)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-brand-orange/40 hover:text-brand-orange transition-colors"
+                  >
+                    {showPasscode ? <Icons.EyeOff /> : <Icons.Eye />}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -509,7 +736,7 @@ const App: React.FC = () => {
             </button>
           </form>
 
-          <div className="mt-8 pt-8 border-t border-slate-50">
+          <div className="mt-8 pt-8 border-t border-slate-50 flex flex-col gap-4">
             <button 
               onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
               className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-brand-orange transition-colors brand-heading"
@@ -527,11 +754,9 @@ const App: React.FC = () => {
       return <LoginPortal />;
     }
 
-    if (activeTab === 'registration' && user) {
-      if (user.role === 'team' && !user.profileComplete) {
+    if (user && !user.profileComplete && user.role !== 'admin') {
+      if (user.role === 'team') {
         return <TeamRegistration user={user} onSubmitted={() => {
-           // On submit team info, we still might want them to do member info? 
-           // Usually team info is self-contained. 
            setNotification("Team profile submitted for review.");
            setActiveTab('home');
         }} />;
@@ -541,12 +766,13 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'home':
-        return <Home user={user} assets={assets} announcements={announcements} />;
+        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} />;
       case 'activities':
         return <Activities 
           user={user} 
           onBook={handleBookActivity} 
           bookings={bookings} 
+          allBookings={user?.role === 'admin' ? sessionRegistrations : userRegistrations}
           assets={assets} 
           hasConfirmedPhotoPolicy={hasConfirmedPhotoPolicy}
           activities={activities}
@@ -558,13 +784,14 @@ const App: React.FC = () => {
           assets={assets} 
           hasConfirmedPhotoPolicy={hasConfirmedPhotoPolicy} 
           activities={activities}
+          galleryAlbums={galleryAlbums}
         />;
       case 'partners':
         return <Partners assets={assets} partners={partners} impactStories={impactStories} />;
       case 'team':
-        return user?.role === 'team' ? <VolunteerLogView user={user} /> : <Home user={user} assets={assets} announcements={announcements} />;
+        return (user?.role === 'team' || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} />;
       case 'wellbeing':
-        return user?.role === 'member' ? <MemberWellbeing user={user} /> : <Home user={user} assets={assets} announcements={announcements} />;
+        return (user?.role === 'member' || user?.role === 'team') ? <MemberWellbeing user={user} /> : <Home user={user} assets={assets} announcements={announcements} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
@@ -578,6 +805,9 @@ const App: React.FC = () => {
             inquiries={inquiries}
             bookings={sessionRegistrations}
             users={allUsers}
+            teamLogs={teamLogs}
+            galleryAlbums={galleryAlbums}
+            mailLogs={mailLogs}
           />
         ) : <Home user={user} assets={assets} announcements={announcements} />;
       default:
@@ -601,8 +831,11 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      {user?.role === 'member' && !hasConfirmedPhotoPolicy && activeTab !== 'login' && activeTab !== 'registration' && (
-        <PhotoPolicyModal onConfirm={() => setHasConfirmedPhotoPolicy(true)} />
+      {(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') && !hasConfirmedPhotoPolicy && activeTab !== 'login' && (
+        <PhotoPolicyModal onConfirm={() => {
+          setHasConfirmedPhotoPolicy(true);
+          localStorage.setItem('freeatlast_photo_policy_confirmed', 'true');
+        }} />
       )}
       {renderContent()}
     </Layout>

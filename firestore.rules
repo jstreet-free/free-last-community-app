@@ -6,71 +6,156 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Reuseable helpers
-    function isSignedIn() {
-      return request.auth != null;
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { 
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; 
     }
-    
-    function isAdmin() {
-      // In this app, we consider anyone signed in with at least Team access as authorized to manage assets
-      // but strictly we check for 'admin' role in logic. Rules can be hardened further.
-      return isSignedIn();
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isOwnerEmail() {
+      return isSignedIn() && 
+             request.auth.token.email.toLowerCase() == 'jstreet@freeatlast.st' &&
+             request.auth.token.email_verified == true;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    // --- Validation Helpers ---
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['title', 'content', 'date', 'author', 'category'])
+        && data.title is string && data.title.size() <= 200
+        && data.content is string && data.content.size() <= 5000
+        && data.date is string
+        && data.author is string
+        && data.category is string;
     }
 
-    // Announcements
+    function isValidActivity(data) {
+      return data.keys().hasAll(['title', 'description', 'date', 'time', 'location', 'capacity', 'bookedCount', 'category', 'status'])
+        && data.title is string && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 2000
+        && data.date is string
+        && data.time is string
+        && data.location is string
+        && data.capacity is number
+        && data.bookedCount is number
+        && data.category in ['youth', 'community', 'sports', 'education']
+        && data.status in ['upcoming', 'past'];
+    }
+
+    function isValidInquiry(data) {
+      return data.keys().hasAll(['name', 'email', 'mobile', 'message', 'type', 'timestamp', 'status', 'targetEmail'])
+        && data.name is string && data.name.size() <= 200
+        && data.email is string && data.email.size() <= 200
+        && data.mobile is string 
+        && data.message is string && data.message.size() <= 10000
+        && data.type is string
+        && data.status is string
+        && data.targetEmail is string
+        && data.timestamp is timestamp;
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll(['bookerName', 'participantName', 'bookerMobile', 'sessionId', 'userId', 'bookingDate', 'sessionTitle', 'sessionDate', 'sessionTime', 'targetEmail'])
+        && data.bookerName is string
+        && data.participantName is string
+        && data.sessionId is string
+        && data.userId == request.auth.uid;
+    }
+
+    function isValidTeamLog(data) {
+      return data.keys().hasAll(['teamMemberId', 'teamMemberName', 'sessionName', 'category', 'hours', 'date', 'description', 'attendeesCount', 'outcome', 'timestamp'])
+        && data.teamMemberId == request.auth.uid
+        && data.sessionName is string
+        && data.hours is number
+        && data.timestamp is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'status', 'id', 'name', 'profileComplete'])
+        && data.email is string && data.email.size() <= 100
+        && data.role in ['admin', 'team', 'member']
+        && data.status in ['pending', 'approved', 'rejected']
+        && data.id is string
+        && data.name is string
+        && data.profileComplete is bool;
+    }
+
+    // --- Match Rules ---
+
     match /announcements/{announcementId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidAnnouncement(incoming());
     }
 
-    // Activities
     match /activities/{activityId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidActivity(incoming());
     }
 
-    // Assets
     match /assets/{assetId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Partners
     match /partners/{partnerId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Impact Stories
     match /impact_stories/{storyId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Inquiries
     match /inquiries/{inquiryId} {
-      allow create: if true;
+      allow create: if isValidInquiry(incoming());
       allow read, delete, update: if isAdmin();
     }
 
-    // Bookings
+    match /mail/{mailId} {
+      allow create: if true; 
+      allow read, update, delete: if isAdmin();
+    }
+
     match /bookings/{bookingId} {
-      allow create: if isSignedIn();
-      allow read, delete, update: if isAdmin();
+      allow create: if isSignedIn() && isValidBooking(incoming());
+      allow read: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow delete, update: if isAdmin();
     }
 
-    // Users
     match /users/{userId} {
-      // Allow any signed-in user to read user profiles (needed for lists and self-lookup)
-      allow read: if request.auth != null;
-      // Allow a user to create their own initial profile document
-      allow create: if request.auth != null && request.auth.uid == userId;
-      // Allow a user to update their own document, or an admin to update any document
-      allow update: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // PII Protection: only owner or admin can read details
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isOwner(userId) && isValidUser(incoming()) 
+                   && (
+                     ((incoming().role == 'member' || incoming().role == 'team') && incoming().status == 'pending')
+                     || (isOwnerEmail() && incoming().role == 'admin' && incoming().status == 'approved')
+                   );
+      allow update: if (isOwner(userId) && (
+                     incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status'])
+                     && (
+                       // Team/Members can update status but team can't approve themselves
+                       (incoming().status == 'pending' || (existing().role == 'member' && incoming().status == 'approved'))
+                       || isOwnerEmail()
+                     )
+                     || (isOwnerEmail() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'profileComplete']))
+                   ))
+                   || (isAdmin() && isValidUser(incoming()));
+    }
+
+    match /team_logs/{logId} {
+      allow create: if isSignedIn() && isValidTeamLog(incoming());
+      allow read: if isSignedIn() && (resource.data.teamMemberId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /gallery_albums/{albumId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

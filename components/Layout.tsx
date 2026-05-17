@@ -17,8 +17,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
     { id: 'activities', label: 'Activities', icon: <Icons.Calendar />, mobileLabel: 'Activities' },
     { id: 'gallery', label: 'Gallery', icon: <Icons.Camera />, mobileLabel: 'Gallery' },
     { id: 'partners', label: 'Partners', icon: <Icons.Briefcase />, mobileLabel: 'Partners' },
-    ...(user?.role === 'team' ? [{ id: 'team', label: 'Team Logs', icon: <Icons.Clock />, mobileLabel: 'Team' }] : []),
-    ...(user?.role === 'member' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
+    ...(user?.role === 'team' || user?.role === 'admin' ? [{ id: 'team', label: 'Team Logs', icon: <Icons.Clock />, mobileLabel: 'Team' }] : []),
+    ...(user?.role === 'member' || user?.role === 'team' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
     ...(user?.role === 'admin' ? [{ id: 'assets', label: 'Management', icon: <Icons.Settings />, mobileLabel: 'Manage' }] : []),
     ...(!user ? [{ id: 'login', label: 'Sign In', icon: <Icons.LogIn />, mobileLabel: 'Login' }] : []),
   ];
@@ -54,8 +54,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
             {user ? (
               <div className="flex items-center gap-4">
                 <div className="hidden sm:flex flex-col items-end">
-                  <p className="text-sm font-bold text-white leading-none mb-1 brand-heading">{user.name}</p>
-                  <p className="text-[10px] text-white/50 font-bold uppercase tracking-widest brand-heading">{user.role}</p>
+                  <p className="text-sm font-bold text-white leading-none mb-1 brand-heading truncate max-w-[150px]">
+                    {user.name || user.email.split('@')[0]}
+                  </p>
+                  <p className="text-[10px] text-white/50 font-bold uppercase tracking-widest brand-heading">
+                    {user.role} {user.role === 'team' ? '& Community Member' : ''}
+                  </p>
                 </div>
                 <button 
                   onClick={onLogout}
@@ -126,7 +130,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
             <div>
               <h4 className="text-white font-bold mb-6 uppercase tracking-widest text-xs brand-heading">Support</h4>
               <p className="text-sm mb-2 text-white/90">Nechells Hub, Birmingham</p>
-              <p className="text-xs italic mb-4">Registered Charity No. 1104886</p>
+              <p className="text-xs italic mb-4">Registered Charity No. 1101078</p>
               <div className="flex gap-3">
                 {['FB', 'IG', 'YT'].map(social => (
                   <div key={social} className="w-8 h-8 bg-white/10 hover:bg-brand-orange hover:text-white rounded-lg flex items-center justify-center text-[9px] font-bold cursor-pointer transition-all border border-white/10 brand-heading">

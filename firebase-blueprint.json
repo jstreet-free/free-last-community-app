@@ -89,13 +89,31 @@
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
+        "email": { "type": "string" },
         "mobile": { "type": "string" },
         "message": { "type": "string" },
         "type": { "type": "string" },
+        "targetEmail": { "type": "string" },
         "timestamp": { "type": "string", "description": "Server timestamp" },
         "status": { "type": "string" }
       },
-      "required": ["name", "mobile", "message"]
+      "required": ["name", "email", "mobile", "message"]
+    },
+    "mail": {
+      "title": "Email Trigger",
+      "description": "A document that triggers an email via the Firebase Trigger Email extension.",
+      "type": "object",
+      "properties": {
+        "to": { "type": "array", "items": { "type": "string" } },
+        "message": {
+          "type": "object",
+          "properties": {
+            "subject": { "type": "string" },
+            "text": { "type": "string" },
+            "html": { "type": "string" }
+          }
+        }
+      }
     },
     "booking": {
       "title": "Booking",
@@ -129,6 +147,21 @@
         "profileComplete": { "type": "boolean" }
       },
       "required": ["email", "role", "status"]
+    },
+    "galleryAlbum": {
+      "title": "Gallery Album",
+      "description": "An archived photography collection linked to Flickr.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "category": { "type": "string", "enum": ["youth", "community", "sports", "education"] },
+        "flickrAlbumUrl": { "type": "string" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["title", "description", "date", "category", "flickrAlbumUrl"]
     }
   },
   "firestore": {
@@ -160,9 +193,17 @@
       "schema": "inquiry",
       "description": "Collection of user inquiries."
     },
+    "/mail/{mailId}": {
+      "schema": "mail",
+      "description": "Collection for triggering outgoing emails."
+    },
     "/bookings/{bookingId}": {
       "schema": "booking",
       "description": "Collection of activity bookings."
+    },
+    "/gallery_albums/{albumId}": {
+      "schema": "galleryAlbum",
+      "description": "Collection of archived photo collections."
     }
   }
 }

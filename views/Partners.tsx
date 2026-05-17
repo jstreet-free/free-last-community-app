@@ -3,6 +3,9 @@ import React, { useState } from 'react';
 import { SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES, Icons, COLORS } from '../constants';
 import { Partner, ImpactStory } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { db } from '../services/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
 
 interface PartnersProps {
   assets: any;
@@ -12,6 +15,70 @@ interface PartnersProps {
 
 export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStories }) => {
   const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null);
+  const [selectedStory, setSelectedStory] = useState<ImpactStory | null>(null);
+  const [partnerForm, setPartnerForm] = useState({
+    orgName: '',
+    email: '',
+    message: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handlePartnerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    const path = 'inquiries';
+    try {
+      // 1. Record inquiry
+      await addDoc(collection(db, path), {
+        name: partnerForm.orgName,
+        mobile: 'N/A', // Using mobile field for schema compatibility
+        message: partnerForm.message,
+        email: partnerForm.email,
+        type: 'Partnership Inquiry',
+        timestamp: serverTimestamp(),
+        status: 'new',
+        targetEmail: 'jstreet@freeatlast.co.uk'
+      });
+
+      // 2. Trigger actual email
+      await addDoc(collection(db, 'mail'), {
+        to: ['jstreet@freeatlast.co.uk'],
+        replyTo: partnerForm.email,
+        message: {
+          subject: `Partnership Inquiry: ${partnerForm.orgName}`,
+          text: `Organization: ${partnerForm.orgName}\nEmail: ${partnerForm.email}\nMessage: ${partnerForm.message}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+              <h2 style="color: #2b337e;">New Partnership Inquiry</h2>
+              <p>An organization is interested in partnering with free@last.</p>
+              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+              <p><strong>Organization:</strong> ${partnerForm.orgName}</p>
+              <p><strong>Contact Email:</strong> ${partnerForm.email}</p>
+              <p><strong>Message:</strong></p>
+              <div style="background: #f4792010; border-left: 4px solid #f47920; padding: 15px; margin: 20px 0;">
+                 <p style="margin: 0; color: #444; line-height: 1.6;">${partnerForm.message}</p>
+              </div>
+              <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                Sent via free@last Community Hub Digital Platform
+              </p>
+            </div>
+          `
+        }
+      });
+
+      setIsSuccess(true);
+      setPartnerForm({ orgName: '', email: '', message: '' });
+      setTimeout(() => setIsSuccess(false), 5000);
+    } catch (error) {
+      setErrorMessage("Failed to send inquiry. Please try again.");
+      handleFirestoreError(error, OperationType.WRITE, path);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="animate-fadeIn">
@@ -155,6 +222,63 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
           </div>
         )}
       </AnimatePresence>
+      
+      {/* Story Detail Modal */}
+      <AnimatePresence>
+        {selectedStory && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedStory(null)}
+              className="absolute inset-0 bg-brand-dark-blue/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              className="relative w-full max-w-2xl bg-white rounded-[3.5rem] overflow-hidden shadow-2xl"
+            >
+              <div className="h-64 relative">
+                <img 
+                  src={selectedStory.image || (selectedStory.id === 's1' ? assets.GALA_AWARDS : assets.FIRE_FIGHTERS)} 
+                  className="w-full h-full object-cover" 
+                  alt={selectedStory.title} 
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-white via-white/20 to-transparent"></div>
+                <button 
+                  onClick={() => setSelectedStory(null)}
+                  className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center hover:bg-white/40 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-12 -mt-12 relative z-10">
+                <span style={{ backgroundColor: COLORS.orange }} className="px-5 py-2 rounded-xl text-white text-[10px] font-bold uppercase tracking-widest brand-heading shadow-xl mb-6 inline-block">
+                  {selectedStory.partnerName}
+                </span>
+                <h3 style={{ color: COLORS.secondary }} className="text-4xl font-black brand-heading uppercase leading-tight mb-6">
+                  {selectedStory.title}
+                </h3>
+                <p className="text-slate-600 text-lg leading-relaxed font-light mb-8">
+                  {selectedStory.content}
+                </p>
+                <div className="pt-6 border-t border-slate-100 flex justify-between items-center">
+                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Collective Impact Story</p>
+                   <button 
+                     onClick={() => setSelectedStory(null)}
+                     style={{ color: COLORS.secondary }}
+                     className="font-black text-sm uppercase tracking-widest hover:underline brand-heading"
+                   >
+                     Close
+                   </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Impact Stories Together */}
       <section className="py-24 bg-slate-50">
@@ -188,7 +312,10 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
                   <div className="p-10 flex-grow">
                     <h3 style={{ color: COLORS.secondary }} className="text-3xl font-bold mb-6 leading-tight brand-heading uppercase">{story.title}</h3>
                     <p className="text-slate-500 text-lg font-light leading-relaxed mb-8">{story.content}</p>
-                    <button className="text-brand-orange font-bold uppercase tracking-widest text-xs flex items-center gap-2 group-hover:gap-4 transition-all brand-heading">
+                    <button 
+                      onClick={() => setSelectedStory(story)}
+                      className="text-brand-orange font-bold uppercase tracking-widest text-xs flex items-center gap-2 group-hover:gap-4 transition-all brand-heading"
+                    >
                       Read Story <Icons.Play />
                     </button>
                   </div>
@@ -209,30 +336,50 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
               <p className="text-slate-500 text-xl font-light max-w-2xl mx-auto">Does your organization want to make a tangible difference? Connect with us today.</p>
             </div>
             
-            <form className="space-y-6">
+            <form onSubmit={handlePartnerSubmit} className="space-y-6">
+              {errorMessage && (
+                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-center font-bold text-sm">
+                  {errorMessage}
+                </div>
+              )}
+              {isSuccess && (
+                <div className="p-4 bg-green-50 text-green-600 rounded-xl text-center font-bold text-sm">
+                  Thank you! Your partnership inquiry has been sent.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <input 
+                  required
                   type="text" 
+                  value={partnerForm.orgName}
+                  onChange={e => setPartnerForm({...partnerForm, orgName: e.target.value})}
                   placeholder="Organization Name"
                   className="w-full p-6 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-orange outline-none font-bold"
                 />
                 <input 
+                  required
                   type="email" 
+                  value={partnerForm.email}
+                  onChange={e => setPartnerForm({...partnerForm, email: e.target.value})}
                   placeholder="Business Email"
                   className="w-full p-6 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-orange outline-none font-bold"
                 />
               </div>
               <textarea 
+                required
+                value={partnerForm.message}
+                onChange={e => setPartnerForm({...partnerForm, message: e.target.value})}
                 placeholder="How would you like to support free@last?"
                 className="w-full p-6 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-orange outline-none font-light h-40"
               />
               <div className="flex justify-center">
                 <button 
-                  type="button"
+                  disabled={isSubmitting}
+                  type="submit"
                   style={{ backgroundColor: COLORS.primary }}
-                  className="text-white px-16 py-6 rounded-xl font-bold text-xl shadow-xl hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+                  className="text-white px-16 py-6 rounded-xl font-bold text-xl shadow-xl hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest disabled:opacity-50"
                 >
-                  Send Inquiry
+                  {isSubmitting ? 'Sending...' : 'Send Inquiry'}
                 </button>
               </div>
             </form>

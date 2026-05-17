@@ -15,10 +15,11 @@ interface ActivitiesProps {
   assets: any;
   hasConfirmedPhotoPolicy: boolean;
   activities: Activity[];
+  allBookings: any[];
   setActiveTab: (tab: string) => void;
 }
 
-export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, assets, hasConfirmedPhotoPolicy, activities, setActiveTab }) => {
+export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, assets, hasConfirmedPhotoPolicy, activities, allBookings, setActiveTab }) => {
   const [filter, setFilter] = useState<'all' | 'youth' | 'community' | 'sports' | 'education'>('all');
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [bookingForm, setBookingForm] = useState({
@@ -66,6 +67,31 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
     return images[activity.id] || assets.YOUTH_HOODIES;
   };
 
+  const getEffectiveSession = (activity: Activity) => {
+    if (activity.frequency !== 'weekly') {
+      return { 
+        date: activity.date,
+        isBookable: activity.status === 'upcoming' 
+      };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let occurrenceDate = new Date(activity.date);
+    occurrenceDate.setHours(0, 0, 0, 0);
+
+    // If the initial date is in the past, move it forward week by week until it's today or in the future
+    while (occurrenceDate < today) {
+      occurrenceDate.setDate(occurrenceDate.getDate() + 7);
+    }
+
+    return {
+      date: occurrenceDate.toISOString().split('T')[0],
+      isBookable: true
+    };
+  };
+
   const getCategoryColor = (cat: string) => {
     switch(cat) {
       case 'youth': return COLORS.orange;
@@ -106,9 +132,28 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {filteredActivities.map((activity) => {
-          const isBooked = bookings.includes(activity.id);
-          const isFull = activity.bookedCount >= activity.capacity;
+          const effective = getEffectiveSession(activity);
+          const effectiveDate = effective.date;
+          
+          // Calculate dynamic booking count for this specific occurrence
+          const occurrenceBookings = allBookings.filter(b => b.sessionId === activity.id && b.sessionDate === effectiveDate);
+          const currentBookedCount = occurrenceBookings.length;
+          
+          // Check if current user is booked for THIS specific occurrence
+          const isBooked = user ? allBookings.some(b => 
+            b.sessionId === activity.id && 
+            b.sessionDate === effectiveDate && 
+            b.userId === user.id
+          ) : false;
+
+          const isFull = currentBookedCount >= activity.capacity;
           const catColor = getCategoryColor(activity.category);
+
+          const bookableActivity = {
+            ...activity,
+            date: effectiveDate,
+            bookedCount: currentBookedCount
+          };
 
           return (
             <div key={activity.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row hover:shadow-xl transition-all">
@@ -120,6 +165,7 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
                 />
                 <div style={{ backgroundColor: catColor }} className="absolute top-4 left-4 text-white px-4 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest shadow-lg brand-heading">
                   {activity.category}
+                  {activity.frequency === 'weekly' && " • Weekly"}
                 </div>
               </div>
               
@@ -130,7 +176,7 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
                 <div className="space-y-3 mb-8">
                   <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
                     <span style={{ color: COLORS.orange }}><Icons.Calendar /></span>
-                    <span>{new Date(activity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    <span>{new Date(effectiveDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                   </div>
                   <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
                     <span style={{ color: COLORS.orange }}><Icons.Clock /></span>
@@ -140,7 +186,7 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
 
                 <div className="mt-auto pt-6 border-t border-gray-50 flex items-center justify-between">
                   <span className="text-[10px] font-bold text-gray-400 brand-heading uppercase tracking-widest">
-                    {activity.capacity - activity.bookedCount} spaces left
+                    {activity.capacity - currentBookedCount} spaces left
                   </span>
                   {!user ? (
                     <button 
@@ -152,7 +198,7 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
                   ) : (
                     <button
                       disabled={isBooked || isFull}
-                      onClick={() => handleOpenBooking(activity)}
+                      onClick={() => handleOpenBooking(bookableActivity)}
                       style={{ backgroundColor: isBooked ? COLORS.green : (isFull ? '#e2e8f0' : COLORS.orange) }}
                       className={`px-8 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white transition-all shadow-md active:scale-95 brand-heading ${
                         !isBooked && !isFull ? 'hover:brightness-110' : 'cursor-default'

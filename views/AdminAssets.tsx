@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Icons, COLORS } from '../constants';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog } from '../types';
 
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc } from 'firebase/firestore';
@@ -17,6 +17,9 @@ interface AdminAssetsProps {
   inquiries: Inquiry[];
   bookings: Booking[];
   users: User[];
+  teamLogs?: TeamLog[];
+  galleryAlbums: GalleryAlbum[];
+  mailLogs?: MailLog[];
 }
 
 export const AdminAssets: React.FC<AdminAssetsProps> = ({ 
@@ -30,8 +33,14 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   inquiries,
   bookings,
   users,
+  teamLogs = [],
+  galleryAlbums,
+  mailLogs = [],
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users'>('activities');
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail'>(() => {
+    return (localStorage.getItem('admin_active_tab') as any) || 'activities';
+  });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState<Partial<Announcement>>({
@@ -40,21 +49,42 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     category: 'Update',
     author: 'Management Team'
   });
+  
+  // Persist admin tab
+  React.useEffect(() => {
+    localStorage.setItem('admin_active_tab', activeAdminTab);
+  }, [activeAdminTab]);
 
   const [editingActivity, setEditingActivity] = useState<ActivityType | null>(null);
-  const [isAddingActivity, setIsAddingActivity] = useState(false);
-  const [newActivity, setNewActivity] = useState<Partial<ActivityType>>({
-    title: '',
-    description: '',
-    date: '',
-    time: '',
-    location: 'The Hub',
-    capacity: 20,
-    bookedCount: 0,
-    category: 'youth',
-    status: 'upcoming',
-    flickrAlbumUrl: ''
+  const [isAddingActivity, setIsAddingActivity] = useState(() => {
+    return localStorage.getItem('admin_is_adding_activity') === 'true';
   });
+  
+  // Persist isAddingActivity
+  React.useEffect(() => {
+    localStorage.setItem('admin_is_adding_activity', isAddingActivity ? 'true' : 'false');
+  }, [isAddingActivity]);
+  const [newActivity, setNewActivity] = useState<Partial<ActivityType>>(() => {
+    const saved = localStorage.getItem('admin_new_activity_draft');
+    return saved ? JSON.parse(saved) : {
+      title: '',
+      description: '',
+      date: '',
+      time: '',
+      location: 'The Hub',
+      capacity: 20,
+      bookedCount: 0,
+      category: 'youth',
+      status: 'upcoming',
+      flickrAlbumUrl: '',
+      frequency: 'once'
+    };
+  });
+
+  // Persist draft
+  React.useEffect(() => {
+    localStorage.setItem('admin_new_activity_draft', JSON.stringify(newActivity));
+  }, [newActivity]);
 
   const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
   const [isAddingPartner, setIsAddingPartner] = useState(false);
@@ -74,6 +104,17 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     content: '',
     partnerName: '',
     image: '',
+  });
+
+  const [editingAlbum, setEditingAlbum] = useState<GalleryAlbum | null>(null);
+  const [isAddingAlbum, setIsAddingAlbum] = useState(false);
+  const [newAlbum, setNewAlbum] = useState<Partial<GalleryAlbum>>({
+    title: '',
+    description: '',
+    date: '',
+    category: 'youth',
+    flickrAlbumUrl: '',
+    imageUrl: ''
   });
 
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -96,8 +137,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       img.src = base64Str;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1000;
-        const MAX_HEIGHT = 1000;
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
         let width = img.width;
         let height = img.height;
 
@@ -172,12 +213,23 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this update?")) {
-      try {
-        await deleteDoc(doc(db, 'announcements', id));
-      } catch (error) {
-        console.error("Error deleting announcement:", error);
-      }
+    if (!id) {
+      alert("Error: Announcement ID is missing.");
+      return;
+    }
+    
+    if (deletingId !== id) {
+      setDeletingId(id);
+      setTimeout(() => setDeletingId(null), 3000); // Reset after 3s
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'announcements', id));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting announcement:", error);
+      alert("Failed to delete update: " + (error.message || "Unknown error"));
     }
   };
 
@@ -204,7 +256,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           bookedCount: newActivity.bookedCount ?? 0,
           category: newActivity.category || 'community',
           status: newActivity.status || 'upcoming',
+          frequency: newActivity.frequency || 'once'
         };
+        
+        // Clear local draft on success
+        localStorage.removeItem('admin_new_activity_draft');
 
         await addDoc(collection(db, 'activities'), activityToSave);
         setIsAddingActivity(false);
@@ -219,7 +275,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           category: 'youth',
           status: 'upcoming',
           flickrAlbumUrl: '',
-          imageUrl: ''
+          imageUrl: '',
+          frequency: 'once'
         });
       }
     } catch (error) {
@@ -229,12 +286,23 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const handleDeleteActivity = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this session?")) {
-      try {
-        await deleteDoc(doc(db, 'activities', id));
-      } catch (error) {
-        console.error("Error deleting activity:", error);
-      }
+    if (!id) {
+      alert("Error: Session ID is missing.");
+      return;
+    }
+
+    if (deletingId !== id) {
+      setDeletingId(id);
+      setTimeout(() => setDeletingId(null), 3000); // Reset after 3s
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'activities', id));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting activity:", error);
+      alert("Failed to delete session: " + (error.message || "Unknown error"));
     }
   };
 
@@ -280,12 +348,23 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const handleDeletePartner = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this partner?")) {
-      try {
-        await deleteDoc(doc(db, 'partners', id));
-      } catch (error) {
-        console.error("Error deleting partner:", error);
-      }
+    if (!id) {
+      alert("Error: Partner ID is missing.");
+      return;
+    }
+
+    if (deletingId !== id) {
+      setDeletingId(id);
+      setTimeout(() => setDeletingId(null), 3000);
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'partners', id));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting partner:", error);
+      alert("Failed to delete partner: " + (error.message || "Unknown error"));
     }
   };
 
@@ -323,12 +402,23 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const handleDeleteImpactStory = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this impact story?")) {
-      try {
-        await deleteDoc(doc(db, 'impact_stories', id));
-      } catch (error) {
-        console.error("Error deleting impact story:", error);
-      }
+    if (!id) {
+      alert("Error: Story ID is missing.");
+      return;
+    }
+
+    if (deletingId !== id) {
+      setDeletingId(id);
+      setTimeout(() => setDeletingId(null), 3000);
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'impact_stories', id));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting impact story:", error);
+      alert("Failed to delete impact story: " + (error.message || "Unknown error"));
     }
   };
 
@@ -341,12 +431,81 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const handleDeleteInquiry = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this inquiry?")) {
-      try {
-        await deleteDoc(doc(db, 'inquiries', id));
-      } catch (error) {
-        console.error("Error deleting inquiry:", error);
+    if (!id) {
+      alert("Error: Inquiry ID is missing.");
+      return;
+    }
+
+    if (deletingId !== id) {
+      setDeletingId(id);
+      setTimeout(() => setDeletingId(null), 3000);
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'inquiries', id));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting inquiry:", error);
+      alert("Failed to delete inquiry: " + (error.message || "Unknown error"));
+    }
+  };
+
+  const handleSaveAlbum = async () => {
+    try {
+      if (editingAlbum) {
+        const { id, ...data } = editingAlbum;
+        await setDoc(doc(db, 'gallery_albums', id), data);
+        setEditingAlbum(null);
+      } else if (isAddingAlbum) {
+        if (!newAlbum.title || !newAlbum.flickrAlbumUrl) {
+          alert("Please enter a title and Flickr URL.");
+          return;
+        }
+
+        const albumToSave = {
+          ...newAlbum,
+          description: newAlbum.description || '',
+          date: newAlbum.date || new Date().toISOString().split('T')[0],
+          category: newAlbum.category || 'youth',
+          imageUrl: newAlbum.imageUrl || ''
+        };
+
+        await addDoc(collection(db, 'gallery_albums'), albumToSave);
+        setIsAddingAlbum(false);
+        setNewAlbum({
+          title: '',
+          description: '',
+          date: '',
+          category: 'youth',
+          flickrAlbumUrl: '',
+          imageUrl: ''
+        });
       }
+    } catch (error) {
+      console.error("Error saving album:", error);
+      alert("Failed to save gallery album.");
+    }
+  };
+
+  const handleDeleteAlbum = async (id: string) => {
+    if (!id) {
+      alert("Error: Album ID is missing.");
+      return;
+    }
+
+    if (deletingId !== id) {
+      setDeletingId(id);
+      setTimeout(() => setDeletingId(null), 3000);
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'gallery_albums', id));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting album:", error);
+      alert("Failed to delete archive album: " + (error.message || "Unknown error"));
     }
   };
 
@@ -436,7 +595,10 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           { id: 'partners', label: 'Partner Network', icon: <Icons.Briefcase /> },
           { id: 'impact', label: 'Collective Impact', icon: <Icons.Play /> },
           { id: 'inquiries', label: 'Inquiries', icon: <Icons.Heart /> },
+          { id: 'rally', label: 'Impact Rally', icon: <Icons.Shield /> },
+          { id: 'archive', label: 'Photo Archive', icon: <Icons.Camera /> },
           { id: 'users', label: 'User Hub', icon: <Icons.User /> },
+          { id: 'mail', label: 'Mail Monitor', icon: <Icons.Megaphone /> },
           { id: 'images', label: 'Brand Images', icon: <Icons.Camera /> }
         ].map((tab) => (
           <button
@@ -886,9 +1048,13 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </button>
                     <button 
                       onClick={() => handleDeletePartner(partner.id)}
-                      className="px-4 py-2 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all"
+                      className={`px-4 py-2 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all ${
+                        deletingId === partner.id 
+                          ? 'bg-red-600 text-white animate-pulse' 
+                          : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                      }`}
                     >
-                      Delete
+                      {deletingId === partner.id ? 'Confirm?' : 'Delete'}
                     </button>
                   </div>
                 </div>
@@ -1025,9 +1191,13 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </button>
                     <button 
                       onClick={() => handleDeleteImpactStory(story.id)}
-                      className="px-4 py-2 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all"
+                      className={`px-4 py-2 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all ${
+                        deletingId === story.id 
+                          ? 'bg-red-600 text-white animate-pulse' 
+                          : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                      }`}
                     >
-                      Delete
+                      {deletingId === story.id ? 'Confirm?' : 'Delete'}
                     </button>
                   </div>
                 </div>
@@ -1092,15 +1262,129 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       )}
                       <button 
                         onClick={() => handleDeleteInquiry(inquiry.id)}
-                        className="w-full px-6 py-3 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all"
+                        className={`w-full px-6 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
+                          deletingId === inquiry.id 
+                            ? 'bg-red-600 text-white animate-pulse' 
+                            : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                        }`}
                       >
-                        Delete Record
+                        {deletingId === inquiry.id ? 'Confirm?' : 'Delete Record'}
                       </button>
                     </div>
                   </div>
                 </div>
               ))
             )}
+          </div>
+        </div>
+      )}
+
+      {activeAdminTab === 'rally' && (
+        <div className="animate-fadeIn">
+          <div className="flex justify-between items-end mb-12">
+            <div>
+              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Collective Impact Rally</h2>
+              <p className="text-gray-500 font-light mt-1">Real-time aggregate data of team contributions and social value.</p>
+            </div>
+            <div className="text-right">
+               <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest brand-heading mb-1">Assumption</div>
+               <div className="text-xs font-bold text-brand-dark-blue px-4 py-2 bg-slate-100 rounded-lg">1 Hour = £15 Social Value</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+            {[
+              { label: 'Weekly Rally (7d)', hours: teamLogs.filter(l => new Date(l.date) >= new Date(Date.now() - 7 * 86400000)).reduce((s, l) => s + l.hours, 0) },
+              { label: 'Monthly Rally (30d)', hours: teamLogs.filter(l => new Date(l.date) >= new Date(Date.now() - 30 * 86400000)).reduce((s, l) => s + l.hours, 0) },
+              { label: 'All-Time Impact', hours: teamLogs.reduce((s, l) => s + l.hours, 0) }
+            ].map((stat, i) => (
+              <div key={i} className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col items-center text-center">
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] brand-heading mb-4">{stat.label}</div>
+                <div style={{ color: COLORS.orange }} className="text-5xl font-bold brand-heading mb-2">{stat.hours} <span className="text-sm opacity-50 uppercase tracking-tighter">hrs</span></div>
+                <div style={{ color: COLORS.green }} className="text-xl font-bold brand-heading">£{(stat.hours * 15).toLocaleString()}</div>
+                <div className="text-[10px] text-slate-300 font-medium uppercase tracking-widest mt-2">Social Value</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+             <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+               <h3 className="text-sm font-bold brand-heading uppercase tracking-widest text-brand-dark-blue">Recent Team Sessions</h3>
+               <button 
+                 onClick={() => {
+                   const headers = ["Date", "Member", "Session", "Hours", "Value", "Attendees"];
+                   const csv = [
+                     headers.join(","),
+                     ...teamLogs.map(l => [
+                       l.date,
+                       l.teamMemberName || "Unknown",
+                       l.sessionName,
+                       l.hours,
+                       `£${l.hours * 15}`,
+                       l.attendeesCount
+                     ].join(","))
+                   ].join("\n");
+                   const blob = new Blob([csv], { type: 'text/csv' });
+                   const url = URL.createObjectURL(blob);
+                   const a = document.createElement('a');
+                   a.href = url;
+                   a.download = `impact_rally_${new Date().toISOString().split('T')[0]}.csv`;
+                   a.click();
+                 }}
+                 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-brand-orange transition-colors brand-heading flex items-center gap-2"
+               >
+                 <Icons.Camera /> Export Report
+               </button>
+             </div>
+             <div className="overflow-x-auto">
+               <table className="w-full text-left">
+                 <thead>
+                   <tr className="border-b border-slate-100 bg-slate-50/30">
+                     <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Team Member</th>
+                     <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Details</th>
+                     <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Hours</th>
+                     <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Impact Value</th>
+                     <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-right">Date</th>
+                   </tr>
+                 </thead>
+                 <tbody className="divide-y divide-slate-50">
+                   {teamLogs.length === 0 ? (
+                     <tr>
+                       <td colSpan={5} className="px-8 py-16 text-center text-slate-300 font-bold brand-heading uppercase tracking-widest text-xs italic">No session logs found yet.</td>
+                     </tr>
+                   ) : (
+                     teamLogs.map(log => (
+                       <tr key={log.id} className="hover:bg-slate-50/50 transition-colors group">
+                         <td className="px-8 py-6">
+                           <div className="flex items-center gap-3">
+                             <div style={{ backgroundColor: COLORS.secondary }} className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold font-mono">
+                               {(log.teamMemberName || 'U')[0].toUpperCase()}
+                             </div>
+                             <p className="text-brand-dark-blue font-bold text-sm">{log.teamMemberName || "Anonymous"}</p>
+                           </div>
+                         </td>
+                         <td className="px-8 py-6">
+                           <div className="flex items-center gap-2 mb-0.5">
+                             <p className="text-slate-700 font-bold text-xs">{log.sessionName}</p>
+                             <span className="text-[8px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase font-black tracking-widest">{log.category}</span>
+                           </div>
+                           <p className="text-[10px] text-slate-400 italic line-clamp-1">"{log.outcome}"</p>
+                         </td>
+                         <td className="px-8 py-6">
+                           <p className="text-brand-dark-blue font-bold text-xs">{log.hours} <span className="opacity-40 font-normal">hrs</span></p>
+                         </td>
+                         <td className="px-8 py-6">
+                           <p style={{ color: COLORS.green }} className="font-bold text-sm tracking-tight">£{(log.hours * 15).toLocaleString()}</p>
+                         </td>
+                         <td className="px-8 py-6 text-right">
+                           <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">{new Date(log.date).toLocaleDateString('en-GB')}</p>
+                         </td>
+                       </tr>
+                     ))
+                   )}
+                 </tbody>
+               </table>
+             </div>
           </div>
         </div>
       )}
@@ -1207,13 +1491,238 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </button>
                     <button 
                       onClick={() => handleDeleteAnnouncement(ann.id)}
-                      className="px-6 py-3 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all"
+                      className={`px-6 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
+                        deletingId === ann.id 
+                          ? 'bg-red-600 text-white animate-pulse' 
+                          : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                      }`}
                     >
-                      Delete
+                      {deletingId === ann.id ? 'Confirm Delete?' : 'Delete'}
                     </button>
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeAdminTab === 'archive' && (
+        <div className="animate-fadeIn">
+          <div className="flex justify-between items-center mb-12">
+            <div>
+              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Photo Archive</h2>
+              <p className="text-gray-500 font-light mt-1">Manage old photo collections and historical events.</p>
+            </div>
+            <button 
+              onClick={() => setIsAddingAlbum(true)}
+              style={{ backgroundColor: COLORS.orange }}
+              className="px-8 py-3 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-lg hover:brightness-110 active:scale-95 flex items-center gap-2"
+            >
+              <Icons.Plus /> New Archive Album
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            {(isAddingAlbum || editingAlbum) && (
+              <div className="bg-slate-50 p-10 rounded-[2.5rem] border-2 border-brand-orange/20 animate-slideIn">
+                <h3 className="text-xl font-bold brand-heading uppercase text-brand-dark-blue mb-8">
+                  {editingAlbum ? "Edit Archive Album" : "Create Archive Album"}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Event Title</label>
+                    <input 
+                      type="text"
+                      value={editingAlbum ? editingAlbum.title : newAlbum.title}
+                      onChange={(e) => editingAlbum ? setEditingAlbum({...editingAlbum, title: e.target.value}) : setNewAlbum({...newAlbum, title: e.target.value})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                      placeholder="e.g. Community Day 2018"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Category</label>
+                    <select 
+                      value={editingAlbum ? editingAlbum.category : newAlbum.category}
+                      onChange={(e) => editingAlbum ? setEditingAlbum({...editingAlbum, category: e.target.value as any}) : setNewAlbum({...newAlbum, category: e.target.value as any})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                    >
+                      <option value="youth">Youth</option>
+                      <option value="community">Community</option>
+                      <option value="sports">Sports</option>
+                      <option value="education">Education</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Event Date</label>
+                    <input 
+                      type="date"
+                      value={editingAlbum ? editingAlbum.date : newAlbum.date}
+                      onChange={(e) => editingAlbum ? setEditingAlbum({...editingAlbum, date: e.target.value}) : setNewAlbum({...newAlbum, date: e.target.value})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Flickr Album URL</label>
+                    <input 
+                      type="text"
+                      value={editingAlbum ? editingAlbum.flickrAlbumUrl : newAlbum.flickrAlbumUrl}
+                      onChange={(e) => editingAlbum ? setEditingAlbum({...editingAlbum, flickrAlbumUrl: e.target.value}) : setNewAlbum({...newAlbum, flickrAlbumUrl: e.target.value})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                      placeholder="https://flickr.com/photos/..."
+                    />
+                  </div>
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Description</label>
+                    <textarea 
+                      value={editingAlbum ? editingAlbum.description : newAlbum.description}
+                      onChange={(e) => editingAlbum ? setEditingAlbum({...editingAlbum, description: e.target.value}) : setNewAlbum({...newAlbum, description: e.target.value})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all h-32 resize-none"
+                      placeholder="Briefly describe the collection..."
+                    />
+                  </div>
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Preview Image</label>
+                    <div className="flex flex-col md:flex-row items-start gap-4">
+                      {(editingAlbum?.imageUrl || newAlbum?.imageUrl) && (
+                        <div className="w-24 h-24 rounded-2xl overflow-hidden shadow-sm border border-gray-100 bg-white shrink-0">
+                          <img 
+                            src={editingAlbum ? editingAlbum.imageUrl : newAlbum.imageUrl} 
+                            alt="Preview" 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                      <div className="flex-grow w-full space-y-4">
+                        <div className="flex gap-4">
+                          <label className="flex-1 cursor-pointer bg-white border border-gray-200 text-brand-dark-blue px-6 py-4 rounded-xl font-bold text-xs brand-heading uppercase tracking-widest hover:bg-slate-50 transition-all text-center">
+                            {editingAlbum?.imageUrl || newAlbum?.imageUrl ? 'Change Photo' : 'Upload Archive Photo'}
+                            <input 
+                              type="file" 
+                              className="hidden" 
+                              accept="image/*" 
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = async () => {
+                                    const compressed = await compressImage(reader.result as string);
+                                    if (editingAlbum) setEditingAlbum({...editingAlbum, imageUrl: compressed});
+                                    else setNewAlbum({...newAlbum, imageUrl: compressed});
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }} 
+                            />
+                          </label>
+                          {(editingAlbum?.imageUrl || newAlbum?.imageUrl) && (
+                            <button 
+                              onClick={() => {
+                                if (editingAlbum) setEditingAlbum({...editingAlbum, imageUrl: ''});
+                                else setNewAlbum({...newAlbum, imageUrl: ''});
+                              }}
+                              className="px-6 py-4 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all"
+                            >
+                              <span className="text-xs font-bold uppercase brand-heading">Remove</span>
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <p className="text-[9px] text-gray-400 uppercase font-bold brand-heading">Image URL</p>
+                            <input 
+                              type="text"
+                              value={editingAlbum ? editingAlbum.imageUrl : newAlbum.imageUrl}
+                              onChange={(e) => editingAlbum ? setEditingAlbum({...editingAlbum, imageUrl: e.target.value}) : setNewAlbum({...newAlbum, imageUrl: e.target.value})}
+                              className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all text-xs"
+                              placeholder="https://..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-[9px] text-gray-400 uppercase font-bold brand-heading">Quick Pick from Brand Images</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(assets).map(([key, url]) => (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  onClick={() => {
+                                    if (editingAlbum) setEditingAlbum({...editingAlbum, imageUrl: url as string});
+                                    else setNewAlbum({...newAlbum, imageUrl: url as string});
+                                  }}
+                                  className={`w-8 h-8 rounded-md overflow-hidden border-2 transition-all shrink-0 ${
+                                    (editingAlbum ? editingAlbum.imageUrl : newAlbum.imageUrl) === url ? 'border-brand-orange scale-110' : 'border-transparent hover:border-slate-300'
+                                  }`}
+                                  title={assetLabels[key] || key}
+                                >
+                                  <img src={url as string} className="w-full h-full object-cover" />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={handleSaveAlbum}
+                    style={{ backgroundColor: COLORS.secondary }}
+                    className="px-10 py-4 text-white rounded-2xl font-black text-xs brand-heading uppercase tracking-[0.2em] shadow-xl hover:brightness-110 transition-all"
+                  >
+                    {editingAlbum ? "Update Collection" : "Save to Archive"}
+                  </button>
+                  <button 
+                    onClick={() => { setEditingAlbum(null); setIsAddingAlbum(false); }}
+                    className="px-10 py-4 bg-slate-200 text-slate-600 rounded-2xl font-black text-xs brand-heading uppercase tracking-[0.2em] hover:bg-slate-300 transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4">
+              {galleryAlbums.length === 0 ? (
+                <div className="text-center py-20 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                  <p className="text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No archive albums found.</p>
+                </div>
+              ) : (
+                galleryAlbums.map((album) => (
+                  <div key={album.id} className="bg-white p-8 rounded-[2rem] border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6 group hover:shadow-xl transition-all">
+                    <div className="flex items-center gap-6">
+                      <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300 overflow-hidden shrink-0">
+                        {album.imageUrl ? <img src={album.imageUrl} className="w-full h-full object-cover" /> : <Icons.Camera />}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="px-3 py-0.5 bg-slate-100 text-slate-500 rounded text-[8px] font-black uppercase tracking-widest">{album.category}</span>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{new Date(album.date).getFullYear()}</span>
+                        </div>
+                        <h4 className="text-lg font-bold brand-heading text-brand-dark-blue">{album.title}</h4>
+                        <p className="text-xs text-gray-500 line-clamp-1">{album.description}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 shrink-0">
+                      <button 
+                        onClick={() => setEditingAlbum(album)}
+                        className="px-6 py-3 bg-slate-50 text-slate-400 hover:text-brand-orange hover:bg-brand-orange/10 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all"
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteAlbum(album.id)}
+                        className={`px-6 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
+                          deletingId === album.id 
+                            ? 'bg-red-600 text-white animate-pulse' 
+                            : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                        }`}
+                      >
+                        {deletingId === album.id ? 'Confirm?' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                )))}
             </div>
           </div>
         </div>
@@ -1227,7 +1736,10 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               <p className="text-gray-500 font-light mt-1">Add sessions, track bookings, and link Flickr albums.</p>
             </div>
             <button 
-              onClick={() => setIsAddingActivity(true)}
+              onClick={() => {
+                setEditingActivity(null);
+                setIsAddingActivity(true);
+              }}
               style={{ backgroundColor: COLORS.orange }}
               className="px-8 py-3 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-lg hover:brightness-110 active:scale-95 flex items-center gap-2"
             >
@@ -1292,6 +1804,17 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     />
                   </div>
                   <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Frequency</label>
+                    <select 
+                      value={editingActivity ? (editingActivity.frequency || 'once') : (newActivity.frequency || 'once')}
+                      onChange={(e) => editingActivity ? setEditingActivity({...editingActivity, frequency: e.target.value as any}) : setNewActivity({...newActivity, frequency: e.target.value as any})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                    >
+                      <option value="once">One-time Session</option>
+                      <option value="weekly">Weekly Recurring</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Display Status</label>
                     <select 
                       value={editingActivity ? editingActivity.status : newActivity.status}
@@ -1316,12 +1839,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Maximum Capacity</label>
                     <input 
                       type="number"
-                      value={Number.isNaN(editingActivity ? editingActivity.capacity : newActivity.capacity) ? '' : (editingActivity ? editingActivity.capacity : newActivity.capacity)}
+                      value={(editingActivity ? editingActivity.capacity : newActivity.capacity) ?? ''}
                       onChange={(e) => {
-                        const val = parseInt(e.target.value);
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value);
                         editingActivity 
-                          ? setEditingActivity({...editingActivity, capacity: Number.isNaN(val) ? 0 : val}) 
-                          : setNewActivity({...newActivity, capacity: Number.isNaN(val) ? 0 : val});
+                          ? setEditingActivity({...editingActivity, capacity: isNaN(val) ? 0 : val}) 
+                          : setNewActivity({...newActivity, capacity: isNaN(val) ? 0 : val});
                       }}
                       className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
                     />
@@ -1330,12 +1853,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Manual Booked Tracker</label>
                     <input 
                       type="number"
-                      value={Number.isNaN(editingActivity ? editingActivity.bookedCount : newActivity.bookedCount) ? '' : (editingActivity ? editingActivity.bookedCount : newActivity.bookedCount)}
+                      value={(editingActivity ? editingActivity.bookedCount : newActivity.bookedCount) ?? ''}
                       onChange={(e) => {
-                        const val = parseInt(e.target.value);
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value);
                         editingActivity 
-                          ? setEditingActivity({...editingActivity, bookedCount: Number.isNaN(val) ? 0 : val}) 
-                          : setNewActivity({...newActivity, bookedCount: Number.isNaN(val) ? 0 : val});
+                          ? setEditingActivity({...editingActivity, bookedCount: isNaN(val) ? 0 : val}) 
+                          : setNewActivity({...newActivity, bookedCount: isNaN(val) ? 0 : val});
                       }}
                       className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
                     />
@@ -1417,14 +1940,47 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       <span style={{ backgroundColor: act.status === 'upcoming' ? COLORS.green + '20' : COLORS.secondary + '20', color: act.status === 'upcoming' ? COLORS.green : COLORS.secondary }} className="text-[9px] font-bold uppercase tracking-widest px-3 py-1 rounded-lg brand-heading">
                         {act.status}
                       </span>
-                      <span className="text-[9px] font-bold uppercase tracking-widest bg-slate-100 text-slate-500 px-3 py-1 rounded-lg brand-heading">{act.category}</span>
-                      <span className="text-[10px] font-bold text-slate-400 brand-heading uppercase">{new Date(act.date).toLocaleDateString()} @ {act.time}</span>
+                      <span className="text-[9px] font-bold uppercase tracking-widest bg-slate-100 text-slate-500 px-3 py-1 rounded-lg brand-heading">
+                        {act.category}
+                      </span>
+                      {act.frequency === 'weekly' && (
+                        <span className="text-[9px] font-bold uppercase tracking-widest bg-brand-orange/10 text-brand-orange px-3 py-1 rounded-lg brand-heading">
+                          Weekly
+                        </span>
+                      )}
+                      {act.frequency === 'weekly' ? (
+                        <span className="text-[10px] font-bold text-slate-400 brand-heading uppercase">
+                          Next: {(() => {
+                            const today = new Date();
+                            today.setHours(0,0,0,0);
+                            let occ = new Date(act.date);
+                            occ.setHours(0,0,0,0);
+                            while (occ < today) occ.setDate(occ.getDate() + 7);
+                            return occ.toLocaleDateString();
+                          })()} @ {act.time}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-400 brand-heading uppercase">
+                          {new Date(act.date).toLocaleDateString()} @ {act.time}
+                        </span>
+                      )}
                     </div>
                     <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold brand-heading mb-1">{act.title}</h3>
                     <div className="flex items-center gap-6 mt-2">
                       <div className="px-3 py-1 bg-brand-orange/5 border border-brand-orange/20 rounded-lg">
                         <p className="text-[10px] font-bold text-brand-orange uppercase tracking-widest brand-heading">
-                          Booking Status: {act.bookedCount} / {act.capacity} Booked
+                          Booking Status: {(() => {
+                            if (act.frequency !== 'weekly') return act.bookedCount;
+                            
+                            const today = new Date();
+                            today.setHours(0,0,0,0);
+                            let occ = new Date(act.date);
+                            occ.setHours(0,0,0,0);
+                            while (occ < today) occ.setDate(occ.getDate() + 7);
+                            const effectiveDate = occ.toISOString().split('T')[0];
+                            
+                            return (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === effectiveDate).length;
+                          })()} / {act.capacity} Booked
                         </p>
                       </div>
                       {act.flickrAlbumUrl && (
@@ -1436,16 +1992,23 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   </div>
                   <div className="flex gap-3 shrink-0">
                     <button 
-                      onClick={() => setEditingActivity(act)}
+                      onClick={() => {
+                        setIsAddingActivity(false);
+                        setEditingActivity(act);
+                      }}
                       className="px-6 py-3 bg-brand-orange text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95"
                     >
                       Update / Track
                     </button>
                     <button 
                       onClick={() => handleDeleteActivity(act.id)}
-                      className="px-4 py-3 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all"
+                      className={`px-4 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
+                        deletingId === act.id 
+                          ? 'bg-red-600 text-white animate-pulse' 
+                          : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                      }`}
                     >
-                      Delete
+                      {deletingId === act.id ? 'Confirm?' : 'Delete'}
                     </button>
                   </div>
                 </div>
@@ -1615,6 +2178,83 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {activeAdminTab === 'mail' && (
+        <div className="animate-fadeIn">
+          <div className="mb-12">
+            <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Mail Delivery Monitor</h2>
+            <p className="text-gray-500 font-light mt-1">Status of system-triggered emails (Bookings, Inquiries, etc).</p>
+          </div>
+
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Recipient</th>
+                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Subject</th>
+                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Status</th>
+                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Last Update</th>
+                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Details/Errors</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {mailLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No mail logs found</td>
+                    </tr>
+                  ) : (
+                    mailLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-8 py-6">
+                          <p className="text-slate-600 font-bold text-xs">{Array.isArray(log.to) ? log.to.join(', ') : log.to}</p>
+                        </td>
+                        <td className="px-8 py-6">
+                          <p className="text-brand-dark-blue font-bold text-xs">{log.message.subject}</p>
+                        </td>
+                        <td className="px-8 py-6">
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                            log.delivery?.state === 'SUCCESS' ? 'bg-green-100 text-green-600' :
+                            log.delivery?.state === 'ERROR' ? 'bg-red-100 text-red-600' :
+                            'bg-orange-100 text-orange-600'
+                          }`}>
+                            {log.delivery?.state || 'PENDING'}
+                          </span>
+                        </td>
+                        <td className="px-8 py-6">
+                          <p className="text-slate-400 text-[10px] font-medium">
+                            {log.delivery?.endTime ? new Date(log.delivery.endTime.toDate ? log.delivery.endTime.toDate() : log.delivery.endTime).toLocaleString() : 'Waiting...'}
+                          </p>
+                        </td>
+                        <td className="px-8 py-6">
+                          {log.delivery?.error ? (
+                            <p className="text-red-500 text-[10px] font-medium max-w-xs break-words">{log.delivery.error}</p>
+                          ) : (
+                            <p className="text-slate-400 text-[10px] italic">No errors reported</p>
+                          )}
+                          {log.delivery?.info?.response && (
+                            <p className="text-slate-500 text-[9px] mt-1">{log.delivery.info.response}</p>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <div className="mt-8 bg-blue-50 p-8 rounded-3xl border border-blue-100">
+            <h3 className="text-blue-900 font-bold flex items-center gap-2 mb-2">
+              <Icons.Shield className="w-5 h-5" />
+              Developer Guidance for info@freeatlast.co.uk
+            </h3>
+            <p className="text-blue-700 text-sm leading-relaxed">
+              If status is <strong>PENDING</strong> for more than 5 minutes, the Firebase extension might be missing SMTP credentials in the console. 
+              If status is <strong>ERROR</strong>, check the "Details/Errors" column above for specific mail server reject messages (e.g. invalid password or unauthorized IP).
+            </p>
           </div>
         </div>
       )}

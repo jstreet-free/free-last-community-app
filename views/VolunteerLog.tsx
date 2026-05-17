@@ -1,18 +1,21 @@
 
 import React, { useState } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../services/firebase';
 import { TeamLog, User } from '../types';
 import { Icons, COLORS } from '../constants';
 import { summarizeTeamImpact } from '../services/geminiService';
 
 interface TeamPortalProps {
   user: User;
+  logs: TeamLog[];
 }
 
-export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user }) => {
-  const [logs, setLogs] = useState<TeamLog[]>([]);
+export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user, logs }) => {
   const [isLogging, setIsLogging] = useState(false);
   const [summary, setSummary] = useState<string>('');
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
     sessionName: '',
@@ -24,24 +27,40 @@ export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user }) => {
     outcome: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newLog: TeamLog = {
-      id: Math.random().toString(36).substr(2, 9),
-      teamMemberId: user.id,
-      ...formData
-    };
-    setLogs([newLog, ...logs]);
-    setIsLogging(false);
-    setFormData({
-      sessionName: '',
-      category: 'Youth Club',
-      hours: 1,
-      date: new Date().toISOString().split('T')[0],
-      description: '',
-      attendeesCount: 0,
-      outcome: ''
-    });
+    if (!user) return;
+    
+    setIsSubmitting(true);
+    try {
+      const newLogData = {
+        teamMemberId: user.id,
+        teamMemberName: user.name || user.email,
+        ...formData,
+        timestamp: serverTimestamp()
+      };
+      
+      await addDoc(collection(db, 'team_logs'), newLogData);
+      
+      setIsLogging(false);
+      setFormData({
+        sessionName: '',
+        category: 'Youth Club',
+        hours: 1,
+        date: new Date().toISOString().split('T')[0],
+        description: '',
+        attendeesCount: 0,
+        outcome: ''
+      });
+      
+      // Provide positive feedback
+      alert("Session report successfully recorded! Your contribution has been added to our impact tracking.");
+    } catch (error) {
+      console.error("Error saving log:", error);
+      alert("Failed to save session report. This might be a temporary connection issue. Please try again or contact the hub administrator.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSummarize = async () => {
@@ -53,6 +72,7 @@ export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user }) => {
   };
 
   const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+  const totalValue = totalHours * 15;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-20 animate-fadeIn">
@@ -62,10 +82,14 @@ export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user }) => {
           <p className="text-white/60 mt-3 text-lg font-light">Record session impact and track your contribution to the community.</p>
         </div>
         
-        <div className="p-10 grid grid-cols-1 sm:grid-cols-2 gap-8 bg-white/5">
+        <div className="p-10 grid grid-cols-1 sm:grid-cols-3 gap-8 bg-white/5">
           <div className="p-8 rounded-2xl bg-white/5 border border-white/10 flex flex-col justify-center">
             <div className="text-[10px] text-white/40 font-bold uppercase tracking-widest brand-heading mb-2">Total Service Hours</div>
-            <div style={{ color: COLORS.orange }} className="text-5xl font-bold brand-heading">{totalHours} <span className="text-lg text-white/30 uppercase">hrs</span></div>
+            <div style={{ color: COLORS.orange }} className="text-4xl font-bold brand-heading">{totalHours} <span className="text-xs text-white/30 uppercase tracking-tighter">hrs</span></div>
+          </div>
+          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 flex flex-col justify-center">
+            <div className="text-[10px] text-white/40 font-bold uppercase tracking-widest brand-heading mb-2">Social Value Generated</div>
+            <div style={{ color: COLORS.green }} className="text-4xl font-bold brand-heading">£{totalValue.toLocaleString()}</div>
           </div>
           <div className="flex items-center">
             <button 
@@ -165,9 +189,10 @@ export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user }) => {
               <button 
                 type="submit" 
                 style={{ backgroundColor: COLORS.orange }} 
-                className="text-white px-12 py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+                disabled={isSubmitting}
+                className="text-white px-12 py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest disabled:opacity-50"
               >
-                Submit Session Report
+                {isSubmitting ? 'Submitting...' : 'Submit Session Report'}
               </button>
             </div>
           </form>
@@ -205,7 +230,7 @@ export const VolunteerLogView: React.FC<TeamPortalProps> = ({ user }) => {
                      </span>
                    </div>
                    <p className="text-[10px] text-gray-400 font-bold uppercase brand-heading mb-4">
-                     {new Date(log.date).toLocaleDateString()} • {log.hours} hrs • {log.attendeesCount} participants
+                     {new Date(log.date).toLocaleDateString()} • {log.hours} hrs • {log.attendeesCount} participants {log.teamMemberName ? `• By ${log.teamMemberName}` : ''}
                    </p>
                    <p className="text-sm text-gray-600 line-clamp-2 italic">"{log.outcome}"</p>
                 </div>

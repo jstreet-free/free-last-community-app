@@ -16,9 +16,10 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
   
   // Parent / Common Info
   const [parentInfo, setParentInfo] = useState({
+    parentName: user.name || '',
     familyName: '',
     address: '',
-    parentEmail: '',
+    parentEmail: user.email || '',
     parentMobile: '',
     livingWith: '',
   });
@@ -133,6 +134,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     if (registrationType === 'teenager') {
       onComplete({
         registrationType: 'teenager',
+        parentName: parentInfo.parentName,
         address: parentInfo.address,
         parentEmail: parentInfo.parentEmail,
         parentMobile: parentInfo.parentMobile,
@@ -147,6 +149,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       }
       onComplete({
         registrationType: 'family',
+        parentName: parentInfo.parentName,
         familyName: parentInfo.familyName,
         address: parentInfo.address,
         parentEmail: parentInfo.parentEmail,
@@ -208,8 +211,18 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
           <div className="space-y-8 animate-fadeIn">
             <SectionTitle icon={<Icons.User />} title={registrationType === 'family' ? "Family & Parent Info" : "Parent/Guardian Contact"} />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className={registrationType === 'family' ? 'md:col-span-1' : 'md:col-span-2'}>
+                <InputLabel>Parent/Guardian Full Name</InputLabel>
+                <input 
+                  type="text" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.parentName}
+                  onChange={e => setParentInfo({...parentInfo, parentName: e.target.value})}
+                  placeholder="e.g. John Smith"
+                />
+              </div>
               {registrationType === 'family' && (
-                <div className="md:col-span-2">
+                <div className="md:col-span-1">
                   <InputLabel>Family Name</InputLabel>
                   <input 
                     type="text" required
@@ -706,26 +719,26 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-16">
-      <div className="bg-white rounded-[3rem] shadow-2xl overflow-hidden border border-gray-100">
-        <div style={{ backgroundColor: COLORS.secondary }} className="p-10 text-white text-center relative">
-          <div className="absolute top-6 left-10 opacity-20">
-            <Icons.Logo reversed className="h-6" />
+    <div className="max-w-4xl mx-auto px-2 md:px-4 py-8 md:py-16">
+      <div className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-2xl overflow-hidden border border-gray-100 flex flex-col max-h-[90vh] md:max-h-none">
+        <div style={{ backgroundColor: COLORS.secondary }} className="p-6 md:p-10 text-white text-center relative shrink-0">
+          <div className="absolute top-4 md:top-6 left-6 md:left-10 opacity-20">
+            <Icons.Logo reversed className="h-4 md:h-6" />
           </div>
-          <h1 className="text-4xl font-bold brand-heading uppercase tracking-widest mb-2">Member Registration</h1>
-          <div className="flex justify-center gap-2 mt-4">
+          <h1 className="text-2xl md:text-4xl font-bold brand-heading uppercase tracking-widest mb-1 md:mb-2">Member Registration</h1>
+          <div className="flex justify-center gap-1.5 md:gap-2 mt-2 md:mt-4">
             {(['type', 'parent', registrationType === 'family' ? 'children' : 'teenager', 'consent'] as Step[]).map((s, idx) => (
               <div 
                 key={s} 
-                className={`h-1.5 rounded-full transition-all duration-500 ${
-                  step === s ? 'w-8 bg-brand-orange' : 'w-4 bg-white/20'
+                className={`h-1 md:h-1.5 rounded-full transition-all duration-500 ${
+                  step === s ? 'w-6 md:w-8 bg-brand-orange' : 'w-3 md:w-4 bg-white/20'
                 }`}
               />
             ))}
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-10">
+        <form onSubmit={handleSubmit} className="p-6 md:p-10 overflow-y-auto flex-grow">
           {error && (
             <div className="mb-8 p-4 bg-red-50 border-2 border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-shake">
               <span className="text-xl">⚠️</span>

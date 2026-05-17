@@ -22,6 +22,7 @@ export interface ChildProfile {
 
 export interface MemberProfile {
   registrationType: 'family' | 'teenager';
+  parentName: string;
   familyName?: string; // for family
   address: string;
   parentEmail: string;
@@ -75,6 +76,7 @@ export interface Activity {
   capacity: number;
   bookedCount: number;
   category: 'youth' | 'community' | 'sports' | 'education';
+  frequency?: 'once' | 'weekly';
   flickrAlbumUrl?: string;
   status: 'upcoming' | 'past';
   imageUrl?: string;
@@ -83,6 +85,7 @@ export interface Activity {
 export interface TeamLog {
   id: string;
   teamMemberId: string;
+  teamMemberName: string;
   date: string;
   hours: number;
   sessionName: string;
@@ -136,6 +139,32 @@ export interface Inquiry {
   type: string;
   timestamp: any;
   status: 'new' | 'read' | 'contacted';
+  targetEmail: string;
+}
+
+export interface MailLog {
+  id: string;
+  to: string | string[];
+  message: {
+    subject: string;
+    text: string;
+    html: string;
+  };
+  delivery?: {
+    attempts: number;
+    endTime: any;
+    error: string | null;
+    leaseExpireTime: any;
+    startTime: any;
+    state: 'SUCCESS' | 'ERROR' | 'PROCESSING' | 'PENDING';
+    info?: {
+      messageId: string;
+      accepted: string[];
+      rejected: string[];
+      pending: string[];
+      response: string;
+    }
+  };
 }
 
 export interface Booking {
@@ -149,4 +178,14 @@ export interface Booking {
   sessionTime: string;
   sessionId: string;
   userId: string;
+}
+
+export interface GalleryAlbum {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  category: 'youth' | 'community' | 'sports' | 'education';
+  flickrAlbumUrl: string;
+  imageUrl?: string;
 }
