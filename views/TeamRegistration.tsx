@@ -15,7 +15,8 @@ export const TeamRegistration: React.FC<TeamRegistrationProps> = ({ user, onSubm
     name: user.name || '',
     department: '',
     role: '',
-    passcode: ''
+    passcode: '',
+    agreedToPhotoPolicy: false
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -23,8 +24,8 @@ export const TeamRegistration: React.FC<TeamRegistrationProps> = ({ user, onSubm
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.department || !formData.role || !formData.passcode) {
-      setError("Please fill in all fields.");
+    if (!formData.name || !formData.department || !formData.role || !formData.passcode || !formData.agreedToPhotoPolicy) {
+      setError("Please fill in all fields and agree to the photo policy.");
       return;
     }
 
@@ -40,8 +41,11 @@ export const TeamRegistration: React.FC<TeamRegistrationProps> = ({ user, onSubm
         name: formData.name,
         department: `${formData.department} (${formData.role})`,
         status: 'pending',
-        profileComplete: true
+        profileComplete: true,
+        photoPolicyAgreed: true,
+        photoPolicyAgreedAt: new Date().toISOString()
       });
+      localStorage.setItem('freeatlast_photo_policy_confirmed', 'true');
       setSubmitted(true);
       onSubmitted();
     } catch (error) {
@@ -149,6 +153,21 @@ export const TeamRegistration: React.FC<TeamRegistrationProps> = ({ user, onSubm
               className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-50 rounded-2xl focus:border-secondary outline-none transition-all font-bold text-slate-600"
               placeholder="Enter secret code"
             />
+          </div>
+
+          <div className="space-y-4 pt-4">
+            <label className="flex items-start gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer group hover:bg-slate-100 transition-all">
+              <input 
+                type="checkbox"
+                required
+                checked={formData.agreedToPhotoPolicy}
+                onChange={e => setFormData({...formData, agreedToPhotoPolicy: e.target.checked})}
+                className="mt-1 w-5 h-5 rounded border-slate-300 text-secondary focus:ring-secondary"
+              />
+              <span className="text-xs text-slate-500 leading-relaxed">
+                I acknowledge and agree to the <span className="font-bold text-secondary">Photo & Media Policy</span>. I understand that photos may be taken during sessions for the activity gallery and promotional purposes.
+              </span>
+            </label>
           </div>
 
           <div className="pt-6">

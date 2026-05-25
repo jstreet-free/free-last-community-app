@@ -73,6 +73,15 @@ service cloud.firestore {
         && data.hours is number
         && data.timestamp is timestamp;
     }
+    
+    function isValidWellbeingLog(data) {
+      return data.keys().hasAll(['memberId', 'memberName', 'date', 'emotion', 'impactText'])
+        && data.memberId == request.auth.uid
+        && data.memberName is string
+        && data.date is string
+        && data.emotion is string
+        && data.impactText is string;
+    }
 
     function isValidUser(data) {
       return data.keys().hasAll(['email', 'role', 'status', 'id', 'name', 'profileComplete'])
@@ -150,6 +159,12 @@ service cloud.firestore {
     match /team_logs/{logId} {
       allow create: if isSignedIn() && isValidTeamLog(incoming());
       allow read: if isSignedIn() && (resource.data.teamMemberId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /wellbeing_logs/{logId} {
+      allow create: if isSignedIn() && isValidWellbeingLog(incoming());
+      allow read: if isSignedIn() && (resource.data.memberId == request.auth.uid || isAdmin());
       allow update, delete: if isAdmin();
     }
 

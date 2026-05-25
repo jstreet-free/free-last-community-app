@@ -95,6 +95,7 @@ const App: React.FC = () => {
   const [userRegistrations, setUserRegistrations] = useState<Booking[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [teamLogs, setTeamLogs] = useState<TeamLog[]>([]);
+  const [wellbeingLogs, setWellbeingLogs] = useState<MoodLog[]>([]);
   const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
   const [mailLogs, setMailLogs] = useState<MailLog[]>([]);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -261,6 +262,33 @@ const App: React.FC = () => {
       if (error.message.includes('index')) {
         setNotification("System update: Some data might be slow to load while indexes are building.");
       }
+    });
+    return () => unsubscribe();
+  }, [user?.role, user?.id]);
+
+  // Sync wellbeing logs from Firestore
+  useEffect(() => {
+    if (!user) {
+      setWellbeingLogs([]);
+      return;
+    }
+    
+    // Admins see all, others see only theirs
+    let q = query(collection(db, 'wellbeing_logs'));
+    if (user.role !== 'admin') {
+      q = query(collection(db, 'wellbeing_logs'), where('memberId', '==', user.id));
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: MoodLog[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as MoodLog);
+      });
+      // Sort client-side by date desc
+      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setWellbeingLogs(items);
+    }, (error) => {
+      console.error("Wellbeing logs sync error:", error);
     });
     return () => unsubscribe();
   }, [user?.role, user?.id]);
@@ -791,10 +819,11 @@ const App: React.FC = () => {
       case 'team':
         return (user?.role === 'team' || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} />;
       case 'wellbeing':
-        return (user?.role === 'member' || user?.role === 'team') ? <MemberWellbeing user={user} /> : <Home user={user} assets={assets} announcements={announcements} />;
+        return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
+            user={user!}
             assets={assets} 
             onUpdate={handleUpdateAsset} 
             onReset={handleResetAssets}
@@ -806,6 +835,7 @@ const App: React.FC = () => {
             bookings={sessionRegistrations}
             users={allUsers}
             teamLogs={teamLogs}
+            wellbeingLogs={wellbeingLogs}
             galleryAlbums={galleryAlbums}
             mailLogs={mailLogs}
           />

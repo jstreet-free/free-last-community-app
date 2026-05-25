@@ -361,7 +361,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                 />
               </div>
               <div>
-                <InputLabel>Current Medication</InputLabel>
+                <InputLabel>Medication / Additional Needs (SEN)</InputLabel>
                 <textarea 
                   className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
                   value={teenagerInfo.medication}
@@ -524,7 +524,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                     />
                   </div>
                   <div>
-                    <InputLabel>Child's Mobile (Optional)</InputLabel>
+                    <InputLabel>Child's Mobile - Step Up & Seniors only</InputLabel>
                     <input 
                       type="tel"
                       className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
@@ -567,7 +567,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                     />
                   </div>
                   <div>
-                    <InputLabel>Current Medication</InputLabel>
+                    <InputLabel>Medication / Additional Needs (SEN)</InputLabel>
                     <textarea 
                       className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
                       value={currentChild.medication}

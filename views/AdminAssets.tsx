@@ -1,12 +1,14 @@
 
 import React, { useState } from 'react';
 import { Icons, COLORS } from '../constants';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog } from '../types';
+import { MemberWellbeing } from './MemberWellbeing';
 
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc } from 'firebase/firestore';
 
 interface AdminAssetsProps {
+  user: User;
   assets: any;
   onUpdate: (key: string, newValue: string) => void;
   onReset: () => void;
@@ -18,11 +20,13 @@ interface AdminAssetsProps {
   bookings: Booking[];
   users: User[];
   teamLogs?: TeamLog[];
+  wellbeingLogs?: MoodLog[];
   galleryAlbums: GalleryAlbum[];
   mailLogs?: MailLog[];
 }
 
 export const AdminAssets: React.FC<AdminAssetsProps> = ({ 
+  user,
   assets, 
   onUpdate, 
   onReset,
@@ -34,10 +38,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   bookings,
   users,
   teamLogs = [],
+  wellbeingLogs = [],
   galleryAlbums,
   mailLogs = [],
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail'>(() => {
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing'>(() => {
     return (localStorage.getItem('admin_active_tab') as any) || 'activities';
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -591,6 +596,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
         {[
           { id: 'activities', label: 'Session Management', icon: <Icons.Calendar /> },
           { id: 'bookings', label: 'Session Bookings', icon: <Icons.Clock /> },
+          { id: 'wellbeing', label: 'Wellbeing Monitor', icon: <Icons.Heart /> },
           { id: 'updates', label: 'Centre Updates', icon: <Icons.Megaphone /> },
           { id: 'partners', label: 'Partner Network', icon: <Icons.Briefcase /> },
           { id: 'impact', label: 'Collective Impact', icon: <Icons.Play /> },
@@ -617,6 +623,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           </button>
         ))}
       </div>
+
+      {activeAdminTab === 'wellbeing' && (
+        <div className="animate-fadeIn">
+          <MemberWellbeing user={user} logs={wellbeingLogs} />
+        </div>
+      )}
 
       {activeAdminTab === 'users' && (
         <div className="animate-fadeIn">

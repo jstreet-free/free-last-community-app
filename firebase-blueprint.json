@@ -162,6 +162,22 @@
         "imageUrl": { "type": "string" }
       },
       "required": ["title", "description", "date", "category", "flickrAlbumUrl"]
+    },
+    "wellbeingLog": {
+      "title": "Wellbeing Log",
+      "description": "A reflection or mood entry from a team member or member.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "memberId": { "type": "string" },
+        "memberName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "emotion": { "type": "string" },
+        "impactText": { "type": "string" },
+        "aiResponse": { "type": "string" },
+        "isUrgent": { "type": "boolean" }
+      },
+      "required": ["memberId", "memberName", "date", "emotion", "impactText"]
     }
   },
   "firestore": {
@@ -204,6 +220,10 @@
     "/gallery_albums/{albumId}": {
       "schema": "galleryAlbum",
       "description": "Collection of archived photo collections."
+    },
+    "/wellbeing_logs/{logId}": {
+      "schema": "wellbeingLog",
+      "description": "Collection of wellbeing and mood logs."
     }
   }
 }

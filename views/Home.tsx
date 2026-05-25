@@ -44,7 +44,7 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements, setActi
 
       // 2. Trigger actual email via 'mail' collection
       await addDoc(collection(db, 'mail'), {
-        to: ['jstreet@freeatlast.co.uk'],
+        to: ['jstreet@freeatlast.co.uk', 'info@freeatlast.co.uk'],
         replyTo: inquiryForm.email,
         message: {
           subject: `New Get Involved Inquiry from ${inquiryForm.name}`,

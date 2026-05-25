@@ -18,7 +18,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
     { id: 'gallery', label: 'Gallery', icon: <Icons.Camera />, mobileLabel: 'Gallery' },
     { id: 'partners', label: 'Partners', icon: <Icons.Briefcase />, mobileLabel: 'Partners' },
     ...(user?.role === 'team' || user?.role === 'admin' ? [{ id: 'team', label: 'Team Logs', icon: <Icons.Clock />, mobileLabel: 'Team' }] : []),
-    ...(user?.role === 'member' || user?.role === 'team' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
+    ...(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
     ...(user?.role === 'admin' ? [{ id: 'assets', label: 'Management', icon: <Icons.Settings />, mobileLabel: 'Manage' }] : []),
     ...(!user ? [{ id: 'login', label: 'Sign In', icon: <Icons.LogIn />, mobileLabel: 'Login' }] : []),
   ];

@@ -98,10 +98,12 @@ export interface TeamLog {
 export interface MoodLog {
   id: string;
   memberId: string;
+  memberName: string;
   date: string;
   emotion: string;
   impactText: string;
   aiResponse?: string;
+  isUrgent?: boolean;
 }
 
 export interface Announcement {

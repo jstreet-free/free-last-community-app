@@ -40,12 +40,13 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
         type: 'Partnership Inquiry',
         timestamp: serverTimestamp(),
         status: 'new',
-        targetEmail: 'jstreet@freeatlast.co.uk'
+        targetEmail: 'info@freeatlast.co.uk'
       });
 
       // 2. Trigger actual email
       await addDoc(collection(db, 'mail'), {
-        to: ['jstreet@freeatlast.co.uk'],
+        to: ['info@freeatlast.co.uk'],
+        cc: ['jstreet@freeatlast.co.uk'],
         replyTo: partnerForm.email,
         message: {
           subject: `Partnership Inquiry: ${partnerForm.orgName}`,
