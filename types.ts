@@ -18,6 +18,8 @@ export interface ChildProfile {
   medicalConsent: boolean; // emergency services permission
   mediaConsent: boolean; // photo/video consent
   collectionPermissions: string[]; // up to 5 names
+  ethnicity?: string;
+  religion?: string;
 }
 
 export interface MemberProfile {
@@ -28,6 +30,8 @@ export interface MemberProfile {
   parentEmail: string;
   parentMobile: string;
   livingWith: string;
+  ethnicity?: string;
+  religion?: string;
   
   // For Teenager mode
   teenagerDetails?: {
@@ -46,6 +50,8 @@ export interface MemberProfile {
     parentMobile?: string; // if under 18
     medicalConsent: boolean;
     mediaConsent: boolean;
+    ethnicity?: string;
+    religion?: string;
   };
 
   // For Family mode
@@ -190,4 +196,28 @@ export interface GalleryAlbum {
   category: 'youth' | 'community' | 'sports' | 'education';
   flickrAlbumUrl: string;
   imageUrl?: string;
+}
+
+export interface CaseStudyRequest {
+  id: string;
+  title: string;
+  prompt: string;
+  date: string;
+  isActive: boolean;
+  creatorId: string;
+}
+
+export interface CaseStudy {
+  id: string;
+  requestId: string;
+  requestTitle: string;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  content: string;
+  date: string;
+  status: 'approved' | 'pending';
+  category?: string;
+  aiSummary?: string;
+  sentimentScore?: number;
 }

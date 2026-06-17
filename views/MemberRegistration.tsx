@@ -11,40 +11,48 @@ interface MemberRegistrationProps {
 type Step = 'type' | 'parent' | 'teenager' | 'children' | 'consent';
 
 export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, onComplete }) => {
-  const [step, setStep] = useState<Step>('type');
-  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | null>(null);
+  const [step, setStep] = useState<Step>(user.profile ? 'parent' : 'type');
+  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | null>(() => {
+    return user.profile?.registrationType || null;
+  });
   
   // Parent / Common Info
   const [parentInfo, setParentInfo] = useState({
-    parentName: user.name || '',
-    familyName: '',
-    address: '',
-    parentEmail: user.email || '',
-    parentMobile: '',
-    livingWith: '',
+    parentName: user.profile?.parentName || user.name || '',
+    familyName: user.profile?.familyName || '',
+    address: user.profile?.address || '',
+    parentEmail: user.profile?.parentEmail || user.email || '',
+    parentMobile: user.profile?.parentMobile || '',
+    livingWith: user.profile?.livingWith || '',
+    ethnicity: user.profile?.ethnicity || '',
+    religion: user.profile?.religion || '',
   });
 
   // Teenager Info
   const [teenagerInfo, setTeenagerInfo] = useState({
-    name: user.name || '',
-    dob: '',
-    age: 0,
-    ownMobile: '',
-    ownEmail: user.email || '',
-    schoolCollege: '',
-    dietaryAllergies: '',
-    medicalConditions: '',
-    medication: '',
-    canSwim: false,
-    swimDistance: '',
-    parentName: '',
-    parentMobile: '',
-    medicalConsent: false,
-    mediaConsent: false,
+    name: user.profile?.teenagerDetails?.name || user.name || '',
+    dob: user.profile?.teenagerDetails?.dob || '',
+    age: user.profile?.teenagerDetails?.age || 0,
+    ownMobile: user.profile?.teenagerDetails?.ownMobile || '',
+    ownEmail: user.profile?.teenagerDetails?.ownEmail || user.email || '',
+    schoolCollege: user.profile?.teenagerDetails?.schoolCollege || '',
+    dietaryAllergies: user.profile?.teenagerDetails?.dietaryAllergies || '',
+    medicalConditions: user.profile?.teenagerDetails?.medicalConditions || '',
+    medication: user.profile?.teenagerDetails?.medication || '',
+    canSwim: user.profile?.teenagerDetails?.canSwim || false,
+    swimDistance: user.profile?.teenagerDetails?.swimDistance || '',
+    parentName: user.profile?.parentName || '',
+    parentMobile: user.profile?.parentMobile || '',
+    medicalConsent: user.profile?.medicalConsent || false,
+    mediaConsent: user.profile?.mediaConsent || false,
+    ethnicity: user.profile?.teenagerDetails?.ethnicity || '',
+    religion: user.profile?.teenagerDetails?.religion || '',
   });
 
   // Children Info (for Family mode)
-  const [children, setChildren] = useState<ChildProfile[]>([]);
+  const [children, setChildren] = useState<ChildProfile[]>(() => {
+    return user.profile?.children || [];
+  });
   const [currentChild, setCurrentChild] = useState<Partial<ChildProfile>>({
     name: '',
     dob: '',
@@ -61,9 +69,22 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     medicalConsent: false,
     mediaConsent: false,
     collectionPermissions: ['', '', '', '', ''],
+    ethnicity: '',
+    religion: '',
   });
 
-  const [dataConsent, setDataConsent] = useState(false);
+  const [editingChildIndex, setEditingChildIndex] = useState<number | null>(null);
+
+  const startEditChild = (index: number) => {
+    const childToEdit = children[index];
+    setCurrentChild({
+      ...childToEdit,
+      collectionPermissions: childToEdit.collectionPermissions ? [...childToEdit.collectionPermissions, '', '', '', '', ''].slice(0, 5) : ['', '', '', '', '']
+    });
+    setEditingChildIndex(index);
+  };
+
+  const [dataConsent, setDataConsent] = useState(user.profile?.dataConsent || false);
   const [error, setError] = useState<string | null>(null);
 
   // Age calculation helper
@@ -103,7 +124,15 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       collectionPermissions: currentChild.collectionPermissions?.filter(name => name.trim() !== '') || []
     };
     
-    setChildren([...children, newChild]);
+    if (editingChildIndex !== null) {
+      const updatedChildren = [...children];
+      updatedChildren[editingChildIndex] = newChild;
+      setChildren(updatedChildren);
+      setEditingChildIndex(null);
+    } else {
+      setChildren([...children, newChild]);
+    }
+    
     setCurrentChild({
       name: '',
       dob: '',
@@ -120,6 +149,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       medicalConsent: false,
       mediaConsent: false,
       collectionPermissions: ['', '', '', '', ''],
+      ethnicity: '',
+      religion: '',
     });
   };
 
@@ -139,6 +170,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         parentEmail: parentInfo.parentEmail,
         parentMobile: parentInfo.parentMobile,
         livingWith: parentInfo.livingWith,
+        ethnicity: parentInfo.ethnicity,
+        religion: parentInfo.religion,
         teenagerDetails: teenagerInfo,
         dataConsent
       });
@@ -155,6 +188,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         parentEmail: parentInfo.parentEmail,
         parentMobile: parentInfo.parentMobile,
         livingWith: parentInfo.livingWith,
+        ethnicity: parentInfo.ethnicity,
+        religion: parentInfo.religion,
         children,
         dataConsent
       });
@@ -269,6 +304,26 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                   onChange={e => setParentInfo({...parentInfo, livingWith: e.target.value})}
                 />
               </div>
+              <div>
+                <InputLabel>Ethnicity</InputLabel>
+                <input 
+                  type="text"
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.ethnicity || ''}
+                  onChange={e => setParentInfo({...parentInfo, ethnicity: e.target.value})}
+                  placeholder="e.g. White British, Asian British"
+                />
+              </div>
+              <div>
+                <InputLabel>Religion / Faith</InputLabel>
+                <input 
+                  type="text"
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.religion || ''}
+                  onChange={e => setParentInfo({...parentInfo, religion: e.target.value})}
+                  placeholder="e.g. Christian, None"
+                />
+              </div>
             </div>
             <div className="flex justify-between pt-8">
               <button type="button" onClick={() => setStep('type')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
@@ -333,6 +388,26 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                   className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
                   value={teenagerInfo.ownEmail}
                   onChange={e => setTeenagerInfo({...teenagerInfo, ownEmail: e.target.value})}
+                />
+              </div>
+              <div>
+                <InputLabel>Ethnicity</InputLabel>
+                <input 
+                  type="text"
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={teenagerInfo.ethnicity || ''}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, ethnicity: e.target.value})}
+                  placeholder="e.g. White British, Asian British"
+                />
+              </div>
+              <div>
+                <InputLabel>Religion / Faith</InputLabel>
+                <input 
+                  type="text"
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={teenagerInfo.religion || ''}
+                  onChange={e => setTeenagerInfo({...teenagerInfo, religion: e.target.value})}
+                  placeholder="e.g. Christian, None"
                 />
               </div>
               <div className="md:col-span-2">
@@ -470,13 +545,22 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                         <h4 className="font-bold text-brand-dark-blue brand-heading uppercase">{child.name}</h4>
                         <p className="text-xs text-gray-400">Age: {child.age} • {child.schoolCollege}</p>
                       </div>
-                      <button 
-                        type="button" 
-                        onClick={() => handleRemoveChild(idx)}
-                        className="text-red-400 hover:text-red-600 p-2"
-                      >
-                        <Icons.LogOut />
-                      </button>
+                      <div className="flex gap-2">
+                        <button 
+                          type="button" 
+                          onClick={() => startEditChild(idx)}
+                          className="px-3 py-1.5 bg-brand-orange text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 transition-all font-sans"
+                        >
+                          Edit
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={() => handleRemoveChild(idx)}
+                          className="px-3 py-1.5 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all font-sans"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -484,7 +568,9 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
 
               {/* Add Child Form */}
               <div className="bg-white border-4 border-dashed border-gray-100 p-8 rounded-[2rem] space-y-8">
-                <h4 className="text-lg font-bold brand-heading uppercase tracking-widest text-gray-400">New Child Details</h4>
+                <h4 className="text-lg font-bold brand-heading uppercase tracking-widest text-brand-orange">
+                  {editingChildIndex !== null ? `Editing Details for ${currentChild.name || 'Child'}` : "New Child Details"}
+                </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <InputLabel>Child's Name</InputLabel>
@@ -539,6 +625,26 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                       className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
                       value={currentChild.ownEmail}
                       onChange={e => setCurrentChild({...currentChild, ownEmail: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Ethnicity</InputLabel>
+                    <input 
+                      type="text"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.ethnicity || ''}
+                      onChange={e => setCurrentChild({...currentChild, ethnicity: e.target.value})}
+                      placeholder="e.g. White British"
+                    />
+                  </div>
+                  <div>
+                    <InputLabel>Religion / Faith</InputLabel>
+                    <input 
+                      type="text"
+                      className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                      value={currentChild.religion || ''}
+                      onChange={e => setCurrentChild({...currentChild, religion: e.target.value})}
+                      placeholder="e.g. Christian, None"
                     />
                   </div>
                   <div className="md:col-span-2">
@@ -647,11 +753,41 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                 <button 
                   type="button"
                   onClick={handleAddChild}
-                  style={{ backgroundColor: COLORS.green }}
-                  className="w-full text-white py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest"
+                  style={{ backgroundColor: editingChildIndex !== null ? COLORS.orange : COLORS.green }}
+                  className="w-full text-white py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest text-sm"
                 >
-                  Add Child to Family
+                  {editingChildIndex !== null ? "Save Child Changes" : "Add Child to Family"}
                 </button>
+                {editingChildIndex !== null && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setEditingChildIndex(null);
+                      setCurrentChild({
+                        name: '',
+                        dob: '',
+                        age: 0,
+                        address: '',
+                        ownMobile: '',
+                        ownEmail: '',
+                        schoolCollege: '',
+                        dietaryAllergies: '',
+                        medicalConditions: '',
+                        medication: '',
+                        canSwim: false,
+                        swimDistance: '',
+                        medicalConsent: false,
+                        mediaConsent: false,
+                        collectionPermissions: ['', '', '', '', ''],
+                        ethnicity: '',
+                        religion: '',
+                      });
+                    }}
+                    className="w-full mt-2 bg-slate-200 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-300 transition-all brand-heading uppercase tracking-widest text-xs"
+                  >
+                    Cancel Editing
+                  </button>
+                )}
               </div>
             </div>
 

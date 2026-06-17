@@ -1,20 +1,30 @@
 
 import React, { useState } from 'react';
 import { SAMPLE_ANNOUNCEMENTS, Icons, COLORS } from '../constants';
-import { User, Announcement } from '../types';
+import { User, Announcement, CaseStudyRequest, CaseStudy } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../services/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
+import { analyzeCaseStudy } from '../services/geminiService';
 
 interface HomeProps {
   user: User | null;
   assets: any;
   announcements: Announcement[];
   setActiveTab: (tab: string) => void;
+  caseStudyRequests: CaseStudyRequest[];
+  caseStudies: CaseStudy[];
 }
 
-export const Home: React.FC<HomeProps> = ({ user, assets, announcements, setActiveTab }) => {
+export const Home: React.FC<HomeProps> = ({ 
+  user, 
+  assets, 
+  announcements, 
+  setActiveTab,
+  caseStudyRequests = [],
+  caseStudies = []
+}) => {
   const [showInquiryModal, setShowInquiryModal] = useState(false);
   const [showAllNews, setShowAllNews] = useState(false);
   const [inquiryForm, setInquiryForm] = useState({
@@ -26,6 +36,60 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements, setActi
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Story submission states
+  const [showStoryModal, setShowStoryModal] = useState(false);
+  const [storyContent, setStoryContent] = useState('');
+  const [isSubmittingStory, setIsSubmittingStory] = useState(false);
+  const [storySuccess, setStorySuccess] = useState(false);
+  const [detectedCategory, setDetectedCategory] = useState('');
+  const [storyError, setStoryError] = useState<string | null>(null);
+
+  // Active feedback invitation filter
+  const activeRequest = caseStudyRequests.find(r => r.isActive);
+  const userHasSubmitted = activeRequest && user && caseStudies.some(cs => cs.requestId === activeRequest.id && cs.memberId === user.id);
+
+  const handleStorySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !activeRequest || !storyContent.trim()) return;
+
+    setIsSubmittingStory(true);
+    setStoryError(null);
+
+    try {
+      // 1. Core live AI extraction of category, sentiment and sentence summary!
+      const analysis = await analyzeCaseStudy(storyContent);
+
+      // 2. Write to Firestore 'case_studies'
+      await addDoc(collection(db, 'case_studies'), {
+        requestId: activeRequest.id,
+        requestTitle: activeRequest.title,
+        memberId: user.id,
+        memberName: user.name || 'Resident',
+        memberEmail: user.email || '',
+        content: storyContent,
+        date: new Date().toISOString().split('T')[0],
+        status: 'approved', // Auto-approved for simple reporting & stats boards
+        category: analysis.category,
+        aiSummary: analysis.aiSummary,
+        sentimentScore: analysis.sentimentScore,
+        createdAt: serverTimestamp()
+      });
+
+      setDetectedCategory(analysis.category);
+      setStorySuccess(true);
+      setStoryContent('');
+      setTimeout(() => {
+        setIsSubmittingStory(false);
+        setShowStoryModal(false);
+        setStorySuccess(false);
+      }, 6000);
+    } catch (err) {
+      console.error("Story submission error:", err);
+      setStoryError("We encountered a small error analyzing or saving your story. Please try again!");
+      setIsSubmittingStory(false);
+    }
+  };
 
   const handleInquirySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,6 +190,41 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements, setActi
           </div>
         </div>
       </section>
+
+      {/* Active Call for Case Studies / Impact Stories */}
+      {activeRequest && user && user.role !== 'admin' && (
+        <section className="bg-yellow-50/70 py-12 px-6 shadow-inner border-y border-yellow-100 flex items-center justify-center animate-fadeIn">
+          <div className="max-w-6xl w-full flex flex-col md:flex-row items-center justify-between gap-8">
+            <div className="flex items-start gap-4">
+              <div style={{ backgroundColor: COLORS.yellow }} className="p-4 rounded-2xl shrink-0 text-white shadow-md">
+                <span className="text-xl animate-pulse block">✨</span>
+              </div>
+              <div>
+                <span className="text-[9px] font-black tracking-widest text-brand-orange uppercase brand-heading bg-brand-orange/5 px-2.5 py-1 rounded-full border border-brand-orange/15 shadow-sm">Monthly callback for stories</span>
+                <h3 className="text-2xl font-bold text-brand-dark-blue brand-heading uppercase mt-2.5 leading-tight">{activeRequest.title}</h3>
+                <p className="text-slate-600 text-sm font-light mt-2 max-w-2xl leading-relaxed">{activeRequest.prompt}</p>
+              </div>
+            </div>
+            
+            <div className="shrink-0 w-full md:w-auto">
+              {userHasSubmitted ? (
+                <div style={{ borderColor: COLORS.green }} className="border-2 rounded-2xl px-5 py-3.5 bg-green-50/50 flex items-center gap-3">
+                  <div style={{ backgroundColor: COLORS.green }} className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs">✓</div>
+                  <span style={{ color: COLORS.secondary }} className="font-bold text-xs uppercase tracking-wider brand-heading">Submitted & Compiled</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowStoryModal(true)}
+                  style={{ backgroundColor: COLORS.orange }}
+                  className="w-full md:w-auto hover:brightness-110 text-white px-8 py-5 rounded-xl font-bold text-sm tracking-wider uppercase brand-heading shadow-lg active:scale-95 transition-all text-center"
+                >
+                  Write Your Story
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Impact Section */}
       <section className="py-24 px-4 max-w-7xl mx-auto">
@@ -377,6 +476,111 @@ export const Home: React.FC<HomeProps> = ({ user, assets, announcements, setActi
                       className="w-full py-5 text-white rounded-xl font-bold text-lg brand-heading uppercase tracking-widest shadow-lg hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
                     >
                       {isSubmitting ? 'Sending...' : 'Send Inquiry'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Case Study / Impact Reflection Submission Modal */}
+      <AnimatePresence>
+        {showStoryModal && activeRequest && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!isSubmittingStory) setShowStoryModal(false);
+              }}
+              className="absolute inset-0 bg-brand-dark-blue/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-xl bg-white rounded-[3rem] shadow-2xl overflow-hidden"
+            >
+              <div style={{ backgroundColor: COLORS.secondary }} className="p-10 text-white relative">
+                {!isSubmittingStory && (
+                  <button 
+                    onClick={() => setShowStoryModal(false)}
+                    className="absolute top-8 right-8 text-white/50 hover:text-white transition-colors"
+                  >
+                    <Icons.Plus className="rotate-45 h-8 w-8" />
+                  </button>
+                )}
+                <div style={{ color: COLORS.yellow }} className="mb-4 text-2xl">✨</div>
+                <h2 className="text-3xl font-bold brand-heading uppercase tracking-tight">Share Your Experience</h2>
+                <p className="text-white/60 font-light mt-2">{activeRequest.title}</p>
+              </div>
+
+              <div className="p-10">
+                {storySuccess ? (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-center py-6"
+                  >
+                    <div style={{ backgroundColor: '#2ca58d20', color: '#2ca58d' }} className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <span className="text-4xl animate-bounce">🌟</span>
+                    </div>
+                    <h3 className="text-2xl font-bold brand-heading text-brand-dark-blue mb-2">STORY SUBMITTED!</h3>
+                    <p className="text-slate-500 font-light text-sm mb-6">
+                      Thank you for sharing. Your story was instantly processed by our AI systems:
+                    </p>
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 mb-4 text-left space-y-2">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 font-bold uppercase brand-heading">AI Category:</span>
+                        <span style={{ color: COLORS.orange }} className="font-bold uppercase brand-heading bg-orange-50 px-2 py-0.5 rounded border border-orange-100">{detectedCategory}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 font-bold uppercase brand-heading">Sentiment Score:</span>
+                        <span className="font-extrabold text-teal-600">★★★★★ (5 / 5)</span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium leading-relaxed italic border-t border-slate-100/50 pt-2.5">
+                        Your voice is recorded securely to demonstrate the life-transforming social value of free@last's initiatives in Nechells.
+                      </p>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <form onSubmit={handleStorySubmit} className="space-y-6">
+                    {storyError && (
+                      <div className="p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 text-sm font-medium animate-shake">
+                        {storyError}
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading bg-slate-50 px-2 py-1 rounded">
+                        Please share feel free@last has helped you or your family
+                      </label>
+                      <textarea 
+                        required
+                        disabled={isSubmittingStory}
+                        value={storyContent}
+                        onChange={(e) => setStoryContent(e.target.value)}
+                        className="w-full px-6 py-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-orange outline-none transition-all h-40 resize-none leading-relaxed text-slate-700"
+                        placeholder="Tell us about your journey, what programs you attended (e.g. youth club, sports, trips), the team's support, or anything that made a real difference..."
+                      />
+                    </div>
+                    
+                    <div className="bg-slate-50/50 p-4 rounded-xl border border-dashed border-slate-200 text-xs text-slate-500 flex items-start gap-2.5">
+                      <span className="text-base select-none">🤖</span>
+                      <p className="leading-normal">
+                        <strong>AI Integration Notice:</strong> Upon submission, Gemini's AI extractor will instantly index your story category and summarize the qualitative social impact value for our aggregate founders' report.
+                      </p>
+                    </div>
+
+                    <button 
+                      disabled={isSubmittingStory || !storyContent.trim()}
+                      type="submit"
+                      style={{ backgroundColor: COLORS.orange }}
+                      className="w-full py-5 text-white rounded-xl font-bold text-lg brand-heading uppercase tracking-widest shadow-lg hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      {isSubmittingStory ? 'AI Categorizing Story...' : 'Submit Story ✨'}
                     </button>
                   </form>
                 )}

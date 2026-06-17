@@ -19,6 +19,7 @@ const EMOTIONS = [
   { label: 'Tired', emoji: '😴', color: 'bg-blue-100 text-blue-700', type: 'neutral' },
   { label: 'Stressed', emoji: '🤯', color: 'bg-orange-100 text-orange-700', type: 'negative' },
   { label: 'Sad', emoji: '😢', color: 'bg-indigo-100 text-indigo-700', type: 'negative' },
+  { label: 'Upset', emoji: '😭', color: 'bg-red-100 text-red-700', type: 'negative' },
 ];
 
 export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) => {
@@ -54,23 +55,56 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) 
 
       // 2. If negative, trigger urgent email notification to admin
       if (isUrgent) {
+        const userPhone = user.profile?.parentMobile || user.profile?.teenagerDetails?.ownMobile || 'Not provided';
+        const userEmail = user.email || user.profile?.parentEmail || user.profile?.teenagerDetails?.ownEmail || 'Not provided';
+        const userRoleAndDept = `${user.role}${user.department ? ` - ${user.department}` : ''}`;
+
         await addDoc(collection(db, 'mail'), {
-          to: ['jstreet@freeatlast.co.uk', 'info@freeatlast.co.uk'],
+          to: ['jstreet@freeatlast.st', 'jstreet@freeatlast.co.uk', 'info@freeatlast.co.uk'],
           message: {
-            subject: `URGENT: Negative Wellbeing Log from ${user.name || 'a team member'}`,
-            text: `${user.name} for the department ${user.department || 'Unknown'} reported feeling ${selectedEmotion}.\n\nReflection: "${impactText}"`,
+            subject: `URGENT: Negative Wellbeing Log from ${user.name || 'a member'}`,
+            text: `${user.name || 'A user'} reported feeling ${selectedEmotion}.\nPhone: ${userPhone}\nEmail: ${userEmail}\nRole: ${userRoleAndDept}\n\nReflection: "${impactText}"`,
             html: `
-              <div style="font-family: sans-serif; padding: 20px; border: 2px solid #ef4444; border-radius: 12px;">
-                <h2 style="color: #ef4444;">Urgent Wellbeing Alert</h2>
-                <p><strong>Team Member:</strong> ${user.name || 'Anonymous'}</p>
-                <p><strong>Department:</strong> ${user.department || 'N/A'}</p>
-                <p><strong>Reported Feeling:</strong> ${selectedEmotion} ${emotionData?.emoji}</p>
+              <div style="font-family: sans-serif; padding: 25px; border: 3px solid #ef4444; border-radius: 16px; max-width: 650px;">
+                <h2 style="color: #ef4444; margin-top: 0; font-size: 22px; border-bottom: 2px solid #fee2e2; padding-bottom: 12px;">🚨 Urgent Wellbeing Alert</h2>
+                
+                <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+                  <tr>
+                    <td style="padding: 6px 0; color: #666; font-size: 14px; width: 140px;"><strong>Person's Name:</strong></td>
+                    <td style="padding: 6px 0; color: #1e293b; font-size: 14px; font-weight: bold;">${user.name || 'Anonymous'}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 6px 0; color: #666; font-size: 14px;"><strong>Contact Mobile:</strong></td>
+                    <td style="padding: 6px 0; color: #dc2626; font-size: 14px; font-weight: bold;">${userPhone}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 6px 0; color: #666; font-size: 14px;"><strong>Email Address:</strong></td>
+                    <td style="padding: 6px 0; color: #1e293b; font-size: 14px;">${userEmail}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 6px 0; color: #666; font-size: 14px;"><strong>User Role:</strong></td>
+                    <td style="padding: 6px 0; color: #1e293b; font-size: 14px; text-transform: capitalize;">${userRoleAndDept}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 6px 0; color: #666; font-size: 14px;"><strong>Reported Emotion:</strong></td>
+                    <td style="padding: 6px 0; color: #1e293b; font-size: 14px;">
+                      <span style="background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 9999px; font-weight: bold; font-size: 12px; text-transform: uppercase;">
+                        ${selectedEmotion} ${emotionData?.emoji || ''}
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+
                 <hr style="border: 0; border-top: 1px solid #fee2e2; margin: 20px 0;">
-                <p><strong>Their Reflection:</strong></p>
-                <blockquote style="background: #fef2f2; padding: 15px; border-left: 4px solid #ef4444; font-style: italic;">
+                
+                <p style="margin-bottom: 8px; color: #475569; font-size: 14px;"><strong>What they wrote in their reflection:</strong></p>
+                <div style="background: #fef2f2; padding: 20px; border-left: 6px solid #ef4444; font-style: italic; color: #1e293b; border-radius: 4px; font-size: 15px; line-height: 1.6;">
                   "${impactText}"
-                </blockquote>
-                <p style="font-size: 12px; color: #666; margin-top: 20px;">This email was triggered automatically because a member reported a negative mood state.</p>
+                </div>
+                
+                <p style="font-size: 12px; color: #64748b; margin-top: 25px; border-top: 1px solid #e2e8f0; padding-top: 15px; line-height: 1.4;">
+                  Please keep this contact details handy for your <strong>care call</strong>. This alert message was automatically dispatched by free@last Wellbeing Monitor because they selected a negative emotion state.
+                </p>
               </div>
             `
           }
@@ -201,13 +235,13 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) 
                             }}
                             className="p-2 text-slate-300 hover:text-brand-orange transition-colors"
                           >
-                            <Icons.Key />
+                            <span className="text-[10px] font-black uppercase tracking-widest">Edit Log</span>
                           </button>
                           <button 
                             onClick={() => handleDeleteLog(log.id)}
                             className="p-2 text-slate-300 hover:text-red-500 transition-colors"
                           >
-                            <Icons.Camera className="rotate-45" /> 
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-red-500">Delete</span> 
                           </button>
                         </div>
                      )}

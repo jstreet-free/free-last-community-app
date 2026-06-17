@@ -11,7 +11,7 @@ import { Partners } from './views/Partners';
 import { AdminAssets } from './views/AdminAssets';
 import { TeamRegistration } from './views/TeamRegistration';
 import { PhotoPolicyModal } from './components/PhotoPolicyModal';
-import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog } from './types';
+import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
 import { db, auth } from './services/firebase';
@@ -98,6 +98,8 @@ const App: React.FC = () => {
   const [wellbeingLogs, setWellbeingLogs] = useState<MoodLog[]>([]);
   const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
   const [mailLogs, setMailLogs] = useState<MailLog[]>([]);
+  const [caseStudyRequests, setCaseStudyRequests] = useState<CaseStudyRequest[]>([]);
+  const [caseStudies, setCaseStudies] = useState<CaseStudy[]>([]);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Persist user and tab
@@ -305,6 +307,44 @@ const App: React.FC = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  // Sync case study requests from Firestore
+  useEffect(() => {
+    const q = query(collection(db, 'case_study_requests'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: CaseStudyRequest[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as CaseStudyRequest);
+      });
+      setCaseStudyRequests(items);
+    }, (error) => {
+      console.error("Case study requests sync error:", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync case studies from Firestore (Admin sees all, members see only theirs)
+  useEffect(() => {
+    if (!user) {
+      setCaseStudies([]);
+      return;
+    }
+    let q = query(collection(db, 'case_studies'));
+    if (user.role !== 'admin') {
+      q = query(collection(db, 'case_studies'), where('memberId', '==', user.id));
+    }
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: CaseStudy[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as CaseStudy);
+      });
+      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setCaseStudies(items);
+    }, (error) => {
+      console.error("Case studies sync error:", error);
+    });
+    return () => unsubscribe();
+  }, [user?.role, user?.id]);
 
   // Sync current user specifically to handle real-time approval
   useEffect(() => {
@@ -794,7 +834,7 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'home':
-        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} />;
+        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'activities':
         return <Activities 
           user={user} 
@@ -817,9 +857,9 @@ const App: React.FC = () => {
       case 'partners':
         return <Partners assets={assets} partners={partners} impactStories={impactStories} />;
       case 'team':
-        return (user?.role === 'team' || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} />;
+        return (user?.role === 'team' || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'wellbeing':
-        return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} />;
+        return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
@@ -838,10 +878,12 @@ const App: React.FC = () => {
             wellbeingLogs={wellbeingLogs}
             galleryAlbums={galleryAlbums}
             mailLogs={mailLogs}
+            caseStudyRequests={caseStudyRequests}
+            caseStudies={caseStudies}
           />
-        ) : <Home user={user} assets={assets} announcements={announcements} />;
+        ) : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       default:
-        return <Home user={user} assets={assets} announcements={announcements} />;
+        return <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
     }
   };
 

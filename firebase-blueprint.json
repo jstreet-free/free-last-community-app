@@ -178,6 +178,40 @@
         "isUrgent": { "type": "boolean" }
       },
       "required": ["memberId", "memberName", "date", "emotion", "impactText"]
+    },
+    "caseStudyRequest": {
+      "title": "Case Study Request",
+      "description": "An ad-hoc or monthly call for case studies and impact feed back.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "isActive": { "type": "boolean" },
+        "creatorId": { "type": "string" }
+      },
+      "required": ["title", "prompt", "date", "isActive", "creatorId"]
+    },
+    "caseStudy": {
+      "title": "Case Study",
+      "description": "A success story or case study submitted by a member in response to a request.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestId": { "type": "string" },
+        "requestTitle": { "type": "string" },
+        "memberId": { "type": "string" },
+        "memberName": { "type": "string" },
+        "memberEmail": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["approved", "pending"] },
+        "category": { "type": "string" },
+        "aiSummary": { "type": "string" },
+        "sentimentScore": { "type": "number" }
+      },
+      "required": ["requestId", "requestTitle", "memberId", "memberName", "memberEmail", "content", "date", "status"]
     }
   },
   "firestore": {
@@ -224,6 +258,14 @@
     "/wellbeing_logs/{logId}": {
       "schema": "wellbeingLog",
       "description": "Collection of wellbeing and mood logs."
+    },
+    "/case_study_requests/{requestId}": {
+      "schema": "caseStudyRequest",
+      "description": "Collection of calls for case studies launched by administrators."
+    },
+    "/case_studies/{studyId}": {
+      "schema": "caseStudy",
+      "description": "Collection of member-submitted case studies representing social impact."
     }
   }
 }

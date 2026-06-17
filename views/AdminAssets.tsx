@@ -1,11 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons, COLORS } from '../constants';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from '../types';
 import { MemberWellbeing } from './MemberWellbeing';
+import { SocialImpactPanel } from './SocialImpactPanel';
 
 import { db } from '../services/firebase';
-import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 interface AdminAssetsProps {
   user: User;
@@ -23,6 +24,8 @@ interface AdminAssetsProps {
   wellbeingLogs?: MoodLog[];
   galleryAlbums: GalleryAlbum[];
   mailLogs?: MailLog[];
+  caseStudyRequests?: CaseStudyRequest[];
+  caseStudies?: CaseStudy[];
 }
 
 export const AdminAssets: React.FC<AdminAssetsProps> = ({ 
@@ -41,8 +44,10 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   wellbeingLogs = [],
   galleryAlbums,
   mailLogs = [],
+  caseStudyRequests = [],
+  caseStudies = [],
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing'>(() => {
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact'>(() => {
     return (localStorage.getItem('admin_active_tab') as any) || 'activities';
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -124,6 +129,21 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [selectedUserDetail, setSelectedUserDetail] = useState<User | null>(null);
+  const [uniqueNumInput, setUniqueNumInput] = useState('');
+  const [editStatus, setEditStatus] = useState<UserStatus>('pending');
+  const [editRole, setEditRole] = useState<string>('member');
+
+  useEffect(() => {
+    if (selectedUserDetail) {
+      setUniqueNumInput((selectedUserDetail as any).volunteerNumber || '');
+      setEditStatus(selectedUserDetail.status || 'pending');
+      setEditRole(selectedUserDetail.role || 'member');
+    } else {
+      setUniqueNumInput('');
+      setEditStatus('pending');
+      setEditRole('member');
+    }
+  }, [selectedUserDetail]);
 
   const assetLabels: Record<string, string> = {
     YOUTH_HOODIES: "Hero Image (Youth Team)",
@@ -554,6 +574,28 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  const handleAdminUpdateUser = async (userId: string, newStatus: UserStatus, newRole: string, newVolunteerNum: string) => {
+    try {
+      const updatedFields: any = {
+        status: newStatus,
+        role: newRole,
+        volunteerNumber: newVolunteerNum.trim()
+      };
+      await updateDoc(doc(db, 'users', userId), updatedFields);
+      
+      if (selectedUserDetail && selectedUserDetail.id === userId) {
+        setSelectedUserDetail({
+          ...selectedUserDetail,
+          status: newStatus,
+          role: newRole,
+          volunteerNumber: newVolunteerNum.trim()
+        } as any);
+      }
+    } catch (error) {
+      console.error("Error updating user details:", error);
+    }
+  };
+
   const filteredUsers = users.filter(u => {
     const q = userSearchQuery.toLowerCase();
     if (!q) return true;
@@ -597,6 +639,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           { id: 'activities', label: 'Session Management', icon: <Icons.Calendar /> },
           { id: 'bookings', label: 'Session Bookings', icon: <Icons.Clock /> },
           { id: 'wellbeing', label: 'Wellbeing Monitor', icon: <Icons.Heart /> },
+          { id: 'social-impact', label: 'Founder Impact Lab 🌟', icon: <Icons.Shield /> },
           { id: 'updates', label: 'Centre Updates', icon: <Icons.Megaphone /> },
           { id: 'partners', label: 'Partner Network', icon: <Icons.Briefcase /> },
           { id: 'impact', label: 'Collective Impact', icon: <Icons.Play /> },
@@ -627,6 +670,19 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       {activeAdminTab === 'wellbeing' && (
         <div className="animate-fadeIn">
           <MemberWellbeing user={user} logs={wellbeingLogs} />
+        </div>
+      )}
+
+      {activeAdminTab === 'social-impact' && (
+        <div className="animate-fadeIn">
+          <SocialImpactPanel 
+            users={users}
+            teamLogs={teamLogs}
+            wellbeingLogs={wellbeingLogs}
+            bookings={bookings}
+            caseStudyRequests={caseStudyRequests}
+            caseStudies={caseStudies}
+          />
         </div>
       )}
 
@@ -720,7 +776,14 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   filteredUsers.map((user) => (
                     <tr key={user.id} className="border-b border-gray-50 hover:bg-slate-50/50 transition-colors group">
                       <td className="p-6">
-                        <div className="font-bold text-brand-dark-blue brand-heading">{user.name || 'Anonymous'}</div>
+                        <div className="font-bold text-brand-dark-blue brand-heading flex items-center gap-2">
+                          {user.name || 'Anonymous'}
+                          {(user as any).volunteerNumber && (
+                            <span className="text-[9px] font-black bg-brand-orange/15 text-brand-orange px-2 py-0.5 rounded-md uppercase tracking-wider brand-heading">
+                              ID: {(user as any).volunteerNumber}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{user.department || 'N/A'}</div>
                       </td>
                       <td className="p-6">
@@ -2074,6 +2137,61 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 </div>
               </div>
 
+              {/* Admin Core Settings Panel */}
+              <div className="bg-orange-50/50 rounded-[2rem] border-2 border-brand-orange/20 p-8 mb-12">
+                <h3 className="text-xs font-black brand-heading uppercase tracking-widest text-brand-orange mb-6 flex items-center gap-2">
+                  <Icons.Key className="w-4 h-4" /> Administration Controls
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Account Status</label>
+                    <select 
+                      value={editStatus}
+                      onChange={e => setEditStatus(e.target.value as UserStatus)}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs text-brand-dark-blue outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">User Access Role</label>
+                    <select 
+                      value={editRole}
+                      onChange={e => setEditRole(e.target.value)}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs text-brand-dark-blue outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+                    >
+                      <option value="member">member</option>
+                      <option value="team">team</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Unique Volunteer ID / Code</label>
+                    <input 
+                      type="text"
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs text-brand-dark-blue outline-none placeholder:text-gray-300 focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+                      value={uniqueNumInput}
+                      onChange={e => setUniqueNumInput(e.target.value)}
+                      placeholder="Assign unique code to approve/track"
+                    />
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleAdminUpdateUser(selectedUserDetail.id, editStatus, editRole, uniqueNumInput);
+                      alert("User account saved successfully!");
+                    }}
+                    className="px-6 py-3 bg-brand-orange text-white font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+
               {!selectedUserDetail.profile && (
                 <div className="bg-slate-50 p-12 rounded-[2rem] text-center">
                   <p className="text-slate-400 font-bold brand-heading uppercase text-sm tracking-widest">No registration profile found yet</p>
@@ -2103,6 +2221,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Parent Email</p>
                           <p className="font-bold text-brand-dark-blue truncate">{selectedUserDetail.profile.parentEmail || 'N/A'}</p>
                         </div>
+                        {selectedUserDetail.profile.ethnicity && (
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Ethnicity</p>
+                            <p className="font-bold text-brand-dark-blue">{selectedUserDetail.profile.ethnicity}</p>
+                          </div>
+                        )}
+                        {selectedUserDetail.profile.religion && (
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Religion / Faith</p>
+                            <p className="font-bold text-brand-dark-blue">{selectedUserDetail.profile.religion}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -2147,6 +2277,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded text-slate-500 uppercase tracking-widest">Age: {child.age}</span>
                             </div>
                             <div className="space-y-4">
+                              {(child.ethnicity || child.religion) && (
+                                <div className="flex flex-wrap gap-2 pb-2">
+                                  {child.ethnicity && (
+                                    <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                      Ethnicity: {child.ethnicity}
+                                    </span>
+                                  )}
+                                  {child.religion && (
+                                    <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                      Religion: {child.religion}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               <div className="p-4 bg-orange-50 rounded-xl border border-orange-100">
                                 <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-1">Allergies / Dietary</p>
                                 <p className="text-xs font-medium text-brand-dark-blue italic">{child.dietaryAllergies || 'No specific requests listed'}</p>
@@ -2164,6 +2308,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                         <div className="bg-white border-4 border-brand-orange/10 p-10 rounded-[2.5rem] shadow-lg">
                           <h4 className="text-2xl font-bold brand-heading text-brand-dark-blue mb-8">{selectedUserDetail.profile.teenagerDetails.name}</h4>
                           <div className="space-y-6">
+                            {(selectedUserDetail.profile.teenagerDetails.ethnicity || selectedUserDetail.profile.teenagerDetails.religion) && (
+                              <div className="flex flex-wrap gap-2">
+                                {selectedUserDetail.profile.teenagerDetails.ethnicity && (
+                                  <span className="text-[10px] font-black bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl uppercase tracking-wider text-[9px] brand-heading">
+                                    Ethnicity: {selectedUserDetail.profile.teenagerDetails.ethnicity}
+                                  </span>
+                                )}
+                                {selectedUserDetail.profile.teenagerDetails.religion && (
+                                  <span className="text-[10px] font-black bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl uppercase tracking-wider text-[9px] brand-heading">
+                                    Religion: {selectedUserDetail.profile.teenagerDetails.religion}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             <div className="grid grid-cols-2 gap-4">
                               <div className="p-4 bg-slate-50 rounded-xl">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Age</p>
