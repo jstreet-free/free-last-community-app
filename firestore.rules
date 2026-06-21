@@ -92,7 +92,7 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasAll(['email', 'role', 'status', 'id', 'name', 'profileComplete'])
         && data.email is string && data.email.size() <= 100
-        && data.role in ['admin', 'team', 'member']
+        && data.role in ['admin', 'team', 'member', 'friend']
         && data.status in ['pending', 'approved', 'rejected']
         && data.id is string
         && data.name is string
@@ -118,6 +118,46 @@ service cloud.firestore {
         && data.content is string && data.content.size() <= 10000
         && data.date is string
         && data.status in ['approved', 'pending'];
+    }
+
+    function isValidNewsletterSubscriber(data) {
+      return data.keys().hasAll(['name', 'email', 'subscribedAt'])
+        && data.name is string && data.name.size() <= 200
+        && data.email is string && data.email.size() <= 200;
+    }
+
+    function isValidNewsletter(data) {
+      return data.keys().hasAll(['title', 'content', 'sentAt', 'recipientCount'])
+        && data.title is string && data.title.size() <= 250
+        && data.content is string && data.content.size() <= 50000
+        && data.recipientCount is number;
+    }
+
+    function isValidFriendNeed(data) {
+      return data.keys().hasAll(['title', 'description', 'category', 'date', 'sentStatus'])
+        && data.title is string && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 5000
+        && data.category in ['volunteers', 'resources', 'finance', 'events', 'sponsorship']
+        && data.date is string
+        && data.sentStatus in ['draft', 'sent'];
+    }
+
+    function isValidFriendOffer(data) {
+      return data.keys().hasAll(['friendName', 'friendEmail', 'friendMobile', 'category', 'description', 'date', 'status'])
+        && data.friendName is string && data.friendName.size() <= 200
+        && data.friendEmail is string && data.friendEmail.size() <= 200
+        && data.friendMobile is string
+        && data.category is string
+        && data.description is string && data.description.size() <= 5000
+        && data.date is string
+        && data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidYouTubeVideo(data) {
+      return data.keys().hasAll(['title', 'url', 'addedAt'])
+        && data.title is string && data.title.size() <= 300
+        && data.url is string && data.url.size() <= 500
+        && data.addedAt is string;
     }
 
     // --- Match Rules ---
@@ -169,6 +209,7 @@ service cloud.firestore {
       allow create: if isOwner(userId) && isValidUser(incoming()) 
                    && (
                      ((incoming().role == 'member' || incoming().role == 'team') && incoming().status == 'pending')
+                     || (incoming().role == 'friend' && incoming().status == 'approved')
                      || (isOwnerEmail() && incoming().role == 'admin' && incoming().status == 'approved')
                    );
       allow update: if (isOwner(userId) && (
@@ -209,6 +250,32 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidCaseStudy(incoming());
       allow read: if isSignedIn() && (resource.data.memberId == request.auth.uid || isAdmin());
       allow update, delete: if isAdmin();
+    }
+
+    match /newsletter_subscribers/{subscriberId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /newsletters/{newsletterId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidNewsletter(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    match /friend_needs/{needId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() && isValidFriendNeed(incoming());
+    }
+
+    match /friend_offers/{offerId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /youtube_videos/{videoId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() && isValidYouTubeVideo(incoming());
     }
   }
 }

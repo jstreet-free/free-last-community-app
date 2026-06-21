@@ -16,6 +16,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
     { id: 'home', label: 'Home', icon: <div className="font-bold text-lg">@</div>, mobileLabel: 'Home' },
     { id: 'activities', label: 'Activities', icon: <Icons.Calendar />, mobileLabel: 'Activities' },
     { id: 'gallery', label: 'Gallery', icon: <Icons.Camera />, mobileLabel: 'Gallery' },
+    { id: 'friends', label: 'Friends of', icon: <Icons.Shield />, mobileLabel: 'Friends' },
+    { id: 'videos', label: 'Videos', icon: <Icons.Play />, mobileLabel: 'Videos' },
     { id: 'partners', label: 'Partners', icon: <Icons.Briefcase />, mobileLabel: 'Partners' },
     ...(user?.role === 'team' || user?.role === 'admin' ? [{ id: 'team', label: 'Team Logs', icon: <Icons.Clock />, mobileLabel: 'Team' }] : []),
     ...(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),

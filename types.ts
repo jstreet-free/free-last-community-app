@@ -1,6 +1,11 @@
 
-export type UserRole = 'member' | 'team' | 'admin';
+export type UserRole = 'member' | 'team' | 'admin' | 'friend';
 export type UserStatus = 'pending' | 'approved' | 'rejected';
+
+export interface FriendProfile {
+  mobileNumber: string;
+  businessName?: string;
+}
 
 export interface ChildProfile {
   name: string;
@@ -221,3 +226,52 @@ export interface CaseStudy {
   aiSummary?: string;
   sentimentScore?: number;
 }
+
+export interface NewsletterSubscriber {
+  id: string;
+  name: string;
+  email: string;
+  subscribedAt: any;
+}
+
+export interface Newsletter {
+  id: string;
+  title: string;
+  content: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  links?: { title: string; url: string }[];
+  sentAt: any;
+  recipientCount: number;
+}
+
+export interface FriendNeed {
+  id: string;
+  title: string;
+  description: string;
+  category: 'volunteers' | 'resources' | 'finance' | 'events' | 'sponsorship';
+  date: string;
+  sentStatus: 'draft' | 'sent';
+  sentAt?: any;
+}
+
+export interface FriendOffer {
+  id: string;
+  friendName: string;
+  friendEmail: string;
+  friendMobile: string;
+  businessName?: string;
+  category: 'volunteering' | 'resources' | 'equipment' | 'sale-items' | 'money' | 'sponsorship' | 'other';
+  description: string;
+  date: string;
+  status: 'pending' | 'accepted' | 'declined';
+}
+
+export interface YouTubeVideo {
+  id: string;
+  title: string;
+  url: string;
+  description?: string;
+  addedAt: string;
+}
+

@@ -45,6 +45,34 @@ export const Home: React.FC<HomeProps> = ({
   const [detectedCategory, setDetectedCategory] = useState('');
   const [storyError, setStoryError] = useState<string | null>(null);
 
+  // Newsletter Subscription States
+  const [subscriberName, setSubscriberName] = useState('');
+  const [subscriberEmail, setSubscriberEmail] = useState('');
+  const [subscribedSuccess, setSubscribedSuccess] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subscriberName || !subscriberEmail) return;
+    setSubscribing(true);
+    try {
+      await addDoc(collection(db, 'newsletter_subscribers'), {
+        name: subscriberName,
+        email: subscriberEmail,
+        subscribedAt: new Date().toISOString()
+      });
+      setSubscribedSuccess(true);
+      setSubscriberName('');
+      setSubscriberEmail('');
+      setTimeout(() => setSubscribedSuccess(false), 8000);
+    } catch (err) {
+      console.error("Subscribing failed:", err);
+      alert("Uh oh! Subscription failed, please try again.");
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
   // Active feedback invitation filter
   const activeRequest = caseStudyRequests.find(r => r.isActive);
   const userHasSubmitted = activeRequest && user && caseStudies.some(cs => cs.requestId === activeRequest.id && cs.memberId === user.id);
@@ -374,6 +402,54 @@ export const Home: React.FC<HomeProps> = ({
               className="rounded-3xl shadow-2xl border-[8px] border-white w-full object-cover aspect-[4/5]"
             />
           </div>
+        </div>
+      </section>
+
+      {/* Newsletter Signup Section */}
+      <section style={{ backgroundColor: COLORS.secondary }} className="py-24 px-6 text-white text-center relative overflow-hidden rounded-[3rem] max-w-7xl mx-auto my-12 shadow-xl border border-slate-100">
+        <div className="absolute -left-20 -top-20 w-80 h-80 bg-brand-orange opacity-20 rounded-full blur-3xl"></div>
+        <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-brand-light-blue opacity-20 rounded-full blur-3xl"></div>
+        <div className="max-w-3xl mx-auto relative z-10">
+          <span style={{ color: COLORS.yellow }} className="text-xs font-black uppercase tracking-[0.2em] brand-heading block mb-3">Stay Connected</span>
+          <h2 className="text-4xl md:text-5xl font-black mb-6 brand-heading uppercase tracking-tight leading-none text-white">Subscribe to Our Newsletter</h2>
+          <p className="text-white/80 text-base font-light max-w-xl mx-auto mb-10 leading-relaxed">
+            Get key monthly social impact stats, youth activities bulletins, and opportunities to support Nechells, directly in your inbox.
+          </p>
+
+          {subscribedSuccess ? (
+            <div className="bg-white/10 border border-white/20 p-8 rounded-3xl text-white font-bold max-w-lg mx-auto animate-fadeIn">
+              <span className="text-3xl block mb-2">🎉</span>
+              <p className="text-lg brand-heading uppercase tracking-wider text-brand-orange">Thank you for subscribing!</p>
+              <p className="text-xs text-white/70 font-light mt-1">You are successfully added to the free@last mailing list.</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row gap-4 max-w-xl mx-auto">
+              <input
+                required
+                type="text"
+                placeholder="Your Name"
+                value={subscriberName}
+                onChange={(e) => setSubscriberName(e.target.value)}
+                className="flex-1 bg-white/10 border border-white/20 focus:border-brand-orange focus:bg-white focus:text-slate-700 outline-none px-6 py-4 rounded-xl text-white font-bold transition placeholder:text-white/40"
+              />
+              <input
+                required
+                type="email"
+                placeholder="Email Address"
+                value={subscriberEmail}
+                onChange={(e) => setSubscriberEmail(e.target.value)}
+                className="flex-1 bg-white/10 border border-white/20 focus:border-brand-orange focus:bg-white focus:text-slate-700 outline-none px-6 py-4 rounded-xl text-white font-bold transition placeholder:text-white/40"
+              />
+              <button
+                type="submit"
+                disabled={subscribing}
+                style={{ backgroundColor: COLORS.orange }}
+                className="text-white font-black px-10 py-4 rounded-xl uppercase tracking-widest text-xs brand-heading hover:brightness-110 shadow-lg transition active:scale-95 disabled:opacity-50"
+              >
+                {subscribing ? "Subscribing..." : "Join List"}
+              </button>
+            </form>
+          )}
         </div>
       </section>
 

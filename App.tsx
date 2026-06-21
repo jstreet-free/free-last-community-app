@@ -10,6 +10,8 @@ import { MemberRegistration } from './views/MemberRegistration';
 import { Partners } from './views/Partners';
 import { AdminAssets } from './views/AdminAssets';
 import { TeamRegistration } from './views/TeamRegistration';
+import { FriendsOf } from './views/FriendsOf';
+import { Videos } from './views/Videos';
 import { PhotoPolicyModal } from './components/PhotoPolicyModal';
 import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
@@ -436,7 +438,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (role: UserRole, email?: string, password?: string, isSignUp?: boolean) => {
+  const handleLogin = async (role: UserRole, email?: string, password?: string, isSignUp?: boolean, extraFields?: { name?: string; mobile?: string; businessName?: string }) => {
     setIsLoggingIn(true);
     try {
       let uid = '';
@@ -502,25 +504,37 @@ const App: React.FC = () => {
         // Navigation based on final role
         if (updatedRole === 'admin') setActiveTab('assets');
         else if (updatedRole === 'team') setActiveTab(updatedStatus === 'approved' ? 'team' : 'registration');
+        else if (updatedRole === 'friend') setActiveTab('home');
         else setActiveTab(userData.profileComplete ? 'home' : 'registration');
       } else {
         // New user creation
         const isOwner = email?.toLowerCase() === 'jstreet@freeatlast.st';
         const finalRole = isOwner ? 'admin' : role;
-        const finalStatus = isOwner ? 'approved' : (finalRole === 'admin' ? 'approved' : 'pending');
+        const finalStatus = isOwner ? 'approved' : (finalRole === 'friend' ? 'approved' : (finalRole === 'admin' ? 'approved' : 'pending'));
 
         const newUser: User = {
           id: uid,
-          name: isOwner ? 'James Street' : (finalRole === 'admin' ? 'Admin User' : ''),
+          name: isOwner ? 'James Street' : (finalRole === 'admin' ? 'Admin User' : (extraFields?.name || '')),
           email: email || `${finalRole}@freeatlast.hub`,
           role: finalRole,
-          profileComplete: finalRole === 'admin',
-          status: finalStatus
+          profileComplete: finalRole === 'friend' || finalRole === 'admin',
+          status: finalStatus,
+          profile: finalRole === 'friend' ? {
+            registrationType: 'family',
+            parentName: extraFields?.name || '',
+            parentEmail: email || '',
+            parentMobile: extraFields?.mobile || '',
+            livingWith: '',
+            address: '',
+            dataConsent: true,
+            mobileNumber: extraFields?.mobile || '',
+            businessName: extraFields?.businessName || ''
+          } as any : undefined
         };
         await setDoc(userRef, newUser);
         setUser(newUser);
         
-        setActiveTab(finalRole === 'admin' ? 'assets' : 'registration');
+        setActiveTab(finalRole === 'admin' ? 'assets' : (finalRole === 'friend' ? 'home' : 'registration'));
       }
     } catch (error: any) {
       console.error("Auth error details:", error);
@@ -659,6 +673,11 @@ const App: React.FC = () => {
     const [teamPasscode, setTeamPasscode] = useState('');
     const [showPasscode, setShowPasscode] = useState(false);
 
+    // Friend simple fields
+    const [friendName, setFriendName] = useState('');
+    const [friendMobile, setFriendMobile] = useState('');
+    const [friendBusinessName, setFriendBusinessName] = useState('');
+
     const onSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (mode === 'signup') {
@@ -679,7 +698,11 @@ const App: React.FC = () => {
         finalEmail = `${finalEmail.toLowerCase().replace(/\s/g, '')}@freeatlast.hub`;
       }
       
-      handleLogin(role, finalEmail, password, mode === 'signup');
+      handleLogin(role, finalEmail, password, mode === 'signup', {
+        name: friendName,
+        mobile: friendMobile,
+        businessName: friendBusinessName
+      });
     };
 
     return (
@@ -704,19 +727,56 @@ const App: React.FC = () => {
             {mode === 'signup' && (
               <div className="space-y-3 mb-8">
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">I am joining as a:</label>
-                <div className="flex gap-2 p-1 bg-slate-50 rounded-2xl">
-                  {(['member', 'team', 'admin'] as UserRole[]).map(r => (
+                <div className="flex gap-2 p-1 bg-slate-50 rounded-2xl flex-wrap">
+                  {(['member', 'friend', 'team', 'admin'] as UserRole[]).map(r => (
                     <button
                       key={r}
                       type="button"
                       onClick={() => setRole(r)}
-                      className={`flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all brand-heading ${
+                      className={`flex-1 min-w-[70px] py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all brand-heading ${
                         role === r ? 'bg-brand-dark-blue text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'
                       }`}
                     >
                       {r}
                     </button>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {mode === 'signup' && role === 'friend' && (
+              <div className="space-y-4 mb-4 animate-slideDown">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Your Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. John Smith"
+                    value={friendName}
+                    onChange={(e) => setFriendName(e.target.value)}
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 placeholder:text-slate-300"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Mobile Number</label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="e.g. 07123456789"
+                    value={friendMobile}
+                    onChange={(e) => setFriendMobile(e.target.value)}
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 placeholder:text-slate-300"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Business Name (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Deloitte"
+                    value={friendBusinessName}
+                    onChange={(e) => setFriendBusinessName(e.target.value)}
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 placeholder:text-slate-300"
+                  />
                 </div>
               </div>
             )}
@@ -835,6 +895,10 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'home':
         return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+      case 'friends':
+        return <FriendsOf user={user} setActiveTab={setActiveTab} />;
+      case 'videos':
+        return <Videos user={user} />;
       case 'activities':
         return <Activities 
           user={user} 
@@ -903,7 +967,7 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      {(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') && !hasConfirmedPhotoPolicy && activeTab !== 'login' && (
+      {(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin' || user?.role === 'friend') && !hasConfirmedPhotoPolicy && activeTab !== 'login' && (
         <PhotoPolicyModal onConfirm={() => {
           setHasConfirmedPhotoPolicy(true);
           localStorage.setItem('freeatlast_photo_policy_confirmed', 'true');

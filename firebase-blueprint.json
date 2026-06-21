@@ -212,6 +212,79 @@
         "sentimentScore": { "type": "number" }
       },
       "required": ["requestId", "requestTitle", "memberId", "memberName", "memberEmail", "content", "date", "status"]
+    },
+    "newsletterSubscriber": {
+      "title": "Newsletter Subscriber",
+      "description": "A subscriber to the monthly newsletter.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "subscribedAt": { "type": "string", "description": "Server timestamp" }
+      },
+      "required": ["name", "email"]
+    },
+    "newsletter": {
+      "title": "Newsletter",
+      "description": "An on-brand monthly newsletter.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "links": { "type": "array" },
+        "sentAt": { "type": "string", "description": "Server timestamp" },
+        "recipientCount": { "type": "number" }
+      },
+      "required": ["title", "content", "sentAt", "recipientCount"]
+    },
+    "friendNeed": {
+      "title": "Friend Need",
+      "description": "A help request added by admin for friends to see.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string", "enum": ["volunteers", "resources", "finance", "events", "sponsorship"] },
+        "date": { "type": "string" },
+        "sentStatus": { "type": "string", "enum": ["draft", "sent"] },
+        "sentAt": { "type": "string", "description": "Server timestamp" }
+      },
+      "required": ["title", "description", "category", "date", "sentStatus"]
+    },
+    "friendOffer": {
+      "title": "Friend Offer",
+      "description": "A volunteer or material offer sent by a friend.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "friendName": { "type": "string" },
+        "friendEmail": { "type": "string" },
+        "friendMobile": { "type": "string" },
+        "businessName": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] }
+      },
+      "required": ["friendName", "friendEmail", "friendMobile", "category", "description", "date", "status"]
+    },
+    "youtubeVideo": {
+      "title": "YouTube Video",
+      "description": "A YouTube channel video link managed by administrators.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "description": { "type": "string" },
+        "addedAt": { "type": "string" }
+      },
+      "required": ["title", "url", "addedAt"]
     }
   },
   "firestore": {
@@ -266,6 +339,26 @@
     "/case_studies/{studyId}": {
       "schema": "caseStudy",
       "description": "Collection of member-submitted case studies representing social impact."
+    },
+    "/newsletter_subscribers/{subscriberId}": {
+      "schema": "newsletterSubscriber",
+      "description": "Collection of newsletter email subscribers."
+    },
+    "/newsletters/{newsletterId}": {
+      "schema": "newsletter",
+      "description": "Collection of sent/saved newsletters."
+    },
+    "/friend_needs/{needId}": {
+      "schema": "friendNeed",
+      "description": "Collection of material, volunteer, or event needs requested by administrators."
+    },
+    "/friend_offers/{offerId}": {
+      "schema": "friendOffer",
+      "description": "Collection of contribution, equipment, or volunteering offers made by friends."
+    },
+    "/youtube_videos/{videoId}": {
+      "schema": "youtubeVideo",
+      "description": "Collection of YouTube link highlights for the media center."
     }
   }
 }

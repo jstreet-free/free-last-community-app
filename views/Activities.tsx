@@ -195,6 +195,13 @@ export const Activities: React.FC<ActivitiesProps> = ({ user, onBook, bookings, 
                     >
                       Sign in to book
                     </button>
+                  ) : user.role === 'friend' ? (
+                    <span 
+                      className="text-[9px] font-bold text-slate-400 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-lg uppercase brand-heading"
+                      title="Friends of free@last are supportive sponsors and are not registered to attend member activities."
+                    >
+                      Supporter
+                    </span>
                   ) : (
                     <button
                       disabled={isBooked || isFull}
