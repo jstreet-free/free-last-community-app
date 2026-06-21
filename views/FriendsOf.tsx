@@ -28,13 +28,6 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
     description: ''
   });
 
-  const [needForm, setNeedForm] = useState({
-    title: '',
-    description: '',
-    category: 'volunteers'
-  });
-
-  const [showAddNeed, setShowAddNeed] = useState(false);
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [offerStatusMsg, setOfferStatusMsg] = useState<string | null>(null);
 
@@ -164,101 +157,6 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
     }
   };
 
-  // Admin adding a need
-  const handleAddNeed = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!needForm.title || !needForm.description) return;
-
-    const path = 'friend_needs';
-    try {
-      await addDoc(collection(db, path), {
-        title: needForm.title,
-        description: needForm.description,
-        category: needForm.category,
-        date: new Date().toISOString().split('T')[0],
-        sentStatus: 'draft'
-      });
-      alert("Need requested successfully! Click 'Send Broadcast' to notify all registered Friends.");
-      setNeedForm({ title: '', description: '', category: 'volunteers' });
-      setShowAddNeed(false);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Admin broadcasting a need as an email notification to all registration 'friend' roles
-  const handleBroadcastNeed = async (need: FriendNeed) => {
-    setBroadcastingId(need.id);
-    try {
-      // 1. Query all users with role == 'friend'
-      const q = query(collection(db, 'users'), where('role', '==', 'friend'));
-      const querySnap = await getDocs(q);
-      const friendsEmails: string[] = [];
-      querySnap.forEach(docSnap => {
-        const u = docSnap.data();
-        if (u.email) friendsEmails.push(u.email);
-      });
-
-      if (friendsEmails.length === 0) {
-        alert("Need published! Currently, there are no registered Friends of free@last accounts to email, but it is now publicly visible on this page.");
-      } else {
-        // 2. Add email trigger documents in bulk or a single transactional array
-        await addDoc(collection(db, 'mail'), {
-          to: friendsEmails,
-          message: {
-            subject: `🚨 Supporting Call: ${need.category.toUpperCase()} urgent need: ${need.title}`,
-            text: `Hi Friend of free@last!\n\nOur team has added a new center need that you might be able to help us with:\n\nNeed Title: ${need.title}\nCategory: ${need.category}\n\nDescription:\n${need.description}\n\nIf you have equipment, resources, or time that can satisfy this request, please log into your hub account and post an offer under "Friends Of" page!\n\nWarm regards,\nManagement Team\nfree@last Nechells Hub`,
-            html: `
-              <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #2b337e; padding: 25px; border-radius: 15px;">
-                <div style="background-color: #2b337e; color: #ffffff; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; margin: -25px -25px 25px -25px;">
-                  <h2 style="margin: 0; font-size: 24px;">Supporting Call for free@last</h2>
-                  <p style="margin: 5px 0 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: #ffd600;">Urgent Center Need</p>
-                </div>
-                <p>Hello valued Friend of free@last,</p>
-                <p>The Nechells Hub team has launched a new support request where your help would make a tremendous social impact:</p>
-                
-                <div style="background: #f5f6fa; padding: 20px; border-radius: 10px; border-left: 5px solid #2b337e; margin: 20px 0;">
-                  <h3 style="margin: 0 0 5px 0; color: #2b337e;">${need.title}</h3>
-                  <span style="background: #ffd600; color: #000; font-size: 10px; font-weight: bold; padding: 3px 8px; border-radius: 5px; text-transform: uppercase;">Category: ${need.category}</span>
-                  <p style="margin: 15px 0 0 0; color: #444; line-height: 1.6; white-space: pre-wrap;">${need.description}</p>
-                </div>
-
-                <p>If you can offer volunteering hours, resources, equipment, financial sponsorship, or host an event, please visit the <strong>Friends Of</strong> page in your app to make an offer!</p>
-                
-                <p style="margin-top: 30px;">Thank you for standing alongside the youth & families of Nechells.</p>
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 25px 0;" />
-                <p style="font-size: 10px; color: #999; text-align: center;">
-                  To unsubscribe from these callouts, please contact support. Registered Charity No. 1101078.
-                </p>
-              </div>
-            `
-          }
-        });
-        alert(`Request successfully broadcasted to ${friendsEmails.length} registered friend(s)!`);
-      }
-
-      // 3. Mark as sent in need document
-      await updateDoc(doc(db, 'friend_needs', need.id), {
-        sentStatus: 'sent',
-        sentAt: serverTimestamp()
-      });
-    } catch (err) {
-      console.error(err);
-      alert("Error broadcasting. Please try again.");
-    } finally {
-      setBroadcastingId(null);
-    }
-  };
-
-  const handleDeleteNeed = async (needId: string) => {
-    if (!window.confirm("Are you sure you want to delete this support need?")) return;
-    try {
-      await deleteDoc(doc(db, 'friend_needs', needId));
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleUpdateOfferStatus = async (offer: FriendOffer, newStatus: 'accepted' | 'declined') => {
     try {
       await updateDoc(doc(db, 'friend_offers', offer.id), { status: newStatus });
@@ -270,13 +168,13 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 animate-fadeIn">
       {/* Hero Banner Section */}
-      <div className="bg-gradient-to-br from-brand-dark-blue to-[#404ebd] rounded-[3.5rem] p-12 md:p-20 text-white shadow-xl relative overflow-hidden mb-16">
+      <div className="bg-gradient-to-br from-[#2b337e] to-[#404ebd] rounded-[3.5rem] p-12 md:p-20 text-white shadow-xl relative overflow-hidden mb-16">
         <div className="absolute -right-24 -bottom-24 w-96 h-96 bg-brand-orange opacity-15 rounded-full blur-3xl"></div>
         <div className="max-w-3xl relative z-10">
           <span style={{ color: COLORS.yellow }} className="text-xs font-black uppercase tracking-[0.2em] brand-heading block mb-4">Partner with Nechells Hub</span>
           <h1 className="text-4xl md:text-6xl font-black mb-6 brand-heading uppercase tracking-tight leading-none">Friends of free@last</h1>
           <p className="text-white/80 text-base md:text-xl font-light leading-relaxed mb-8">
-            Our "Friends of free@last" network facilitates localized support. Supporter friends bypass long member intake questionnaires, get instant access to our real-time photos/videos gallery, and collaborate directly on center needs.
+            Become a friend of free@last and share the love, helping to introduce us to your network, share your resources and time.
           </p>
           {!user ? (
             <div className="flex flex-wrap gap-4">
@@ -306,77 +204,7 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
                 <h2 style={{ color: COLORS.secondary }} className="text-3xl font-black brand-heading uppercase tracking-tight">Center Needs</h2>
                 <p className="text-slate-400 text-sm font-medium">How you can make an immediate, direct social impact today</p>
               </div>
-
-              {isAdmin && (
-                <button
-                  onClick={() => setShowAddNeed(!showAddNeed)}
-                  style={{ borderColor: COLORS.orange, color: COLORS.orange }}
-                  className="px-5 py-2.5 rounded-xl border-2 font-bold text-[10px] uppercase tracking-widest hover:bg-orange-50 active:scale-95 transition-all brand-heading"
-                >
-                  {showAddNeed ? "Close Editor" : "New Support Call"}
-                </button>
-              )}
             </div>
-
-            {/* Admin Add Need Panel */}
-            <AnimatePresence>
-              {showAddNeed && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="bg-slate-50 p-8 rounded-3xl border border-slate-100 shadow-inner mb-8 space-y-4"
-                >
-                  <form onSubmit={handleAddNeed} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 px-1">Need Category</label>
-                        <select
-                          value={needForm.category}
-                          onChange={(e) => setNeedForm({ ...needForm, category: e.target.value })}
-                          className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl font-bold text-slate-700 outline-none focus:border-brand-orange transition-all"
-                        >
-                          <option value="volunteers">Volunteers</option>
-                          <option value="resources">Resources / Materials</option>
-                          <option value="finance">Finance / Giving</option>
-                          <option value="events">Events Assistance</option>
-                          <option value="sponsorship">Corporate Sponsorship</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 px-1">Title</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. Minibus tires or holiday lunch cover"
-                          value={needForm.title}
-                          onChange={(e) => setNeedForm({ ...needForm, title: e.target.value })}
-                          className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl font-bold text-slate-700 outline-none focus:border-brand-orange"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 px-1 font-sans">Details / Message</label>
-                      <textarea
-                        rows={3}
-                        required
-                        placeholder="What specific resources or volunteering skills is the center looking for?"
-                        value={needForm.description}
-                        onChange={(e) => setNeedForm({ ...needForm, description: e.target.value })}
-                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-bold text-slate-700 outline-none focus:border-brand-orange resize-none"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      style={{ backgroundColor: COLORS.secondary }}
-                      className="text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all"
-                    >
-                      Save Callout Draft
-                    </button>
-                  </form>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             {loadingNeeds ? (
               <div className="flex justify-center py-20">
@@ -396,42 +224,24 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
                     <div>
                       <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                         <span
-                          className="px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest text-white brand-heading"
+                          className="px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest brand-heading"
                           style={{
                             backgroundColor:
                               need.category === 'volunteers' ? COLORS.green :
                               need.category === 'resources' ? COLORS.orange :
                               need.category === 'finance' ? COLORS.lightBlue :
-                              need.category === 'events' ? COLORS.yellow : COLORS.secondary
+                              need.category === 'events' ? COLORS.yellow : COLORS.secondary,
+                            color:
+                              (need.category === 'events' || need.category === 'volunteers') ? '#1e293b' : '#ffffff'
                           }}
                         >
                           {need.category}
                         </span>
                         
                         {isAdmin && (
-                          <div className="flex gap-2">
-                            {need.sentStatus === 'draft' ? (
-                              <button
-                                disabled={broadcastingId === need.id}
-                                onClick={() => handleBroadcastNeed(need)}
-                                style={{ backgroundColor: COLORS.orange }}
-                                className="text-white px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest disabled:opacity-50"
-                              >
-                                {broadcastingId === need.id ? "Sending..." : "📢 Send Broadcast"}
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-green-500 font-bold bg-green-50 px-3 py-1.5 rounded-lg border border-green-100">
-                                ✓ Sent Notification
-                              </span>
-                            )}
-                            <button
-                              onClick={() => handleDeleteNeed(need.id)}
-                              className="text-slate-400 hover:text-red-500 px-2 text-sm"
-                              title="Delete Callout"
-                            >
-                              ✕
-                            </button>
-                          </div>
+                          <span className="text-[10px] text-slate-400 font-medium font-sans bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">
+                            Manage in Admin Portal 📍
+                          </span>
                         )}
                       </div>
 

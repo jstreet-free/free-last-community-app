@@ -8,13 +8,21 @@ service cloud.firestore {
 
     // --- Helpers ---
     function isSignedIn() { return request.auth != null; }
+    function hasEmail(emailStr) {
+      return isSignedIn() && 
+        request.auth.token != null && 
+        'email' in request.auth.token && 
+        request.auth.token.email != null && 
+        request.auth.token.email.toLowerCase() == emailStr;
+    }
+
     function isAdmin() { 
       return isSignedIn() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-        request.auth.token.email.toLowerCase() == 'jstreet@freeatlast.st' ||
-        request.auth.token.email.toLowerCase() == 'jstreet@freeatlast.co.uk' ||
-        request.auth.token.email.toLowerCase() == 'info@freeatlast.co.uk'
+        hasEmail('jstreet@freeatlast.st') ||
+        hasEmail('jstreet@freeatlast.co.uk') ||
+        hasEmail('info@freeatlast.co.uk')
       );
     }
     function incoming() { return request.resource.data; }
@@ -23,9 +31,9 @@ service cloud.firestore {
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
     function isOwnerEmail() {
       return isSignedIn() && (
-        request.auth.token.email.toLowerCase() == 'jstreet@freeatlast.st' ||
-        request.auth.token.email.toLowerCase() == 'jstreet@freeatlast.co.uk' ||
-        request.auth.token.email.toLowerCase() == 'info@freeatlast.co.uk'
+        hasEmail('jstreet@freeatlast.st') ||
+        hasEmail('jstreet@freeatlast.co.uk') ||
+        hasEmail('info@freeatlast.co.uk')
       );
     }
 
@@ -265,7 +273,8 @@ service cloud.firestore {
 
     match /friend_needs/{needId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin() && isValidFriendNeed(incoming());
+      allow create, update: if isAdmin() && isValidFriendNeed(incoming());
+      allow delete: if isAdmin();
     }
 
     match /friend_offers/{offerId} {
@@ -275,7 +284,8 @@ service cloud.firestore {
 
     match /youtube_videos/{videoId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin() && isValidYouTubeVideo(incoming());
+      allow create, update: if isAdmin() && isValidYouTubeVideo(incoming());
+      allow delete: if isAdmin();
     }
   }
 }

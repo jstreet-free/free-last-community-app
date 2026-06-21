@@ -5,6 +5,7 @@ import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, 
 import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
+import { AdminNeedsManager } from '../components/AdminNeedsManager';
 
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -48,7 +49,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   caseStudyRequests = [],
   caseStudies = [],
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter'>(() => {
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs'>(() => {
     return (localStorage.getItem('admin_active_tab') as any) || 'activities';
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -642,6 +643,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           { id: 'wellbeing', label: 'Wellbeing Monitor', icon: <Icons.Heart /> },
           { id: 'social-impact', label: 'Founder Impact Lab 🌟', icon: <Icons.Shield /> },
           { id: 'newsletter', label: 'Newsletter Hub 📩', icon: <Icons.Megaphone /> },
+          { id: 'needs', label: 'Center Needs 📍', icon: <Icons.Megaphone /> },
           { id: 'updates', label: 'Centre Updates', icon: <Icons.Megaphone /> },
           { id: 'partners', label: 'Partner Network', icon: <Icons.Briefcase /> },
           { id: 'impact', label: 'Collective Impact', icon: <Icons.Play /> },
@@ -2434,6 +2436,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       {activeAdminTab === 'newsletter' && (
         <div className="animate-fadeIn">
           <AdminNewsletterManager />
+        </div>
+      )}
+
+      {activeAdminTab === 'needs' && (
+        <div className="animate-fadeIn">
+          <AdminNeedsManager />
         </div>
       )}
     </div>
