@@ -130,10 +130,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   });
 
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [activeUserSubTab, setActiveUserSubTab] = useState<'member' | 'team' | 'friend' | 'admin' | 'all'>('member');
   const [selectedUserDetail, setSelectedUserDetail] = useState<User | null>(null);
   const [uniqueNumInput, setUniqueNumInput] = useState('');
   const [editStatus, setEditStatus] = useState<UserStatus>('pending');
   const [editRole, setEditRole] = useState<string>('member');
+
+  // Bookings Organization States
+  const [activeBookingView, setActiveBookingView] = useState<'by-activity' | 'all-log'>('by-activity');
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [bookingTimeframeFilter, setBookingTimeframeFilter] = useState<'all' | 'week' | 'month' | 'year'>('all');
+  const [bookingSearchQuery, setBookingSearchQuery] = useState('');
+  const [activitySearchQuery, setActivitySearchQuery] = useState('');
 
   useEffect(() => {
     if (selectedUserDetail) {
@@ -568,6 +576,67 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     document.body.removeChild(link);
   };
 
+  const getParticipantSurnameAndFirstname = (fullName: string) => {
+    const cleanName = (fullName || '').trim();
+    if (!cleanName) return { surname: 'Anonymous', firstname: '', display: 'Anonymous' };
+    const parts = cleanName.split(/\s+/);
+    if (parts.length === 1) {
+      return { surname: parts[0], firstname: '', display: parts[0] };
+    }
+    const surname = parts[parts.length - 1];
+    const firstname = parts.slice(0, parts.length - 1).join(' ');
+    return { surname, firstname, display: `${surname}, ${firstname}` };
+  };
+
+  const getBookingDateObj = (b: Booking): Date => {
+    if (b.bookingDate) {
+      if (typeof b.bookingDate.toDate === 'function') {
+        return b.bookingDate.toDate();
+      }
+      const d = new Date(b.bookingDate);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return new Date(b.sessionDate); // fallback
+  };
+
+  const handleDownloadActivityBookingsCSV = (activityTitle: string, bookingsList: Booking[]) => {
+    if (bookingsList.length === 0) {
+      alert("No bookings to export for this timeframe.");
+      return;
+    }
+    const headers = ["Participant Surname", "Participant Firstname", "Booker Name", "Booker Mobile", "Booking Date", "Session Title", "Session Date", "Session Time", "Attendance Status"];
+    const rows = bookingsList.map(b => {
+      const nameInfo = getParticipantSurnameAndFirstname(b.participantName);
+      const bDate = b.bookingDate?.toDate ? b.bookingDate.toDate().toLocaleString() : b.bookingDate || 'Recent';
+      const attendance = b.attended === true ? 'Attended' : b.attended === false ? 'Absent' : 'Unmarked';
+      return [
+        nameInfo.surname,
+        nameInfo.firstname,
+        b.bookerName || 'N/A',
+        b.bookerMobile || 'N/A',
+        bDate,
+        b.sessionTitle,
+        b.sessionDate,
+        b.sessionTime,
+        attendance
+      ];
+    });
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(","))
+    ].join("\n");
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `freeatlast_registrations_${activityTitle.toLowerCase().replace(/\s+/g, '_')}_${bookingTimeframeFilter}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleUpdateUserStatus = async (userId: string, newStatus: UserStatus) => {
     try {
       await updateDoc(doc(db, 'users', userId), { status: newStatus });
@@ -598,6 +667,74 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  const getSurnameAndFirstname = (fullName: string) => {
+    const cleanName = (fullName || '').trim();
+    if (!cleanName) return { surname: 'Anonymous', firstname: '', display: 'Anonymous' };
+    const parts = cleanName.split(/\s+/);
+    if (parts.length === 1) {
+      return { surname: parts[0], firstname: '', display: parts[0] };
+    }
+    const surname = parts[parts.length - 1];
+    const firstname = parts.slice(0, parts.length - 1).join(' ');
+    return { surname, firstname, display: `${surname}, ${firstname}` };
+  };
+
+  const getUserAttendanceStats = (userId: string) => {
+    const userB = (bookings || []).filter(b => b.userId === userId);
+    const totalBooked = userB.length;
+    const attended = userB.filter(b => b.attended === true);
+    const totalAttended = attended.length;
+    const totalAbsent = userB.filter(b => b.attended === false).length;
+    
+    let lastAttendedStr = 'Never';
+    let daysSinceLastAttendance = null;
+    let hasLongAbsence = false;
+    
+    if (attended.length > 0) {
+      const sortedAttended = [...attended].sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime());
+      const lastSession = sortedAttended[0];
+      const lastDateObj = new Date(lastSession.sessionDate);
+      lastAttendedStr = lastDateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      
+      const diffTime = Math.abs(new Date().getTime() - lastDateObj.getTime());
+      daysSinceLastAttendance = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (daysSinceLastAttendance > 30) {
+        hasLongAbsence = true;
+      }
+    } else if (totalBooked > 0) {
+      hasLongAbsence = true;
+    }
+    
+    return {
+      totalBooked,
+      totalAttended,
+      totalAbsent,
+      lastAttendedStr,
+      daysSinceLastAttendance,
+      hasLongAbsence
+    };
+  };
+
+  const formatRegistrationDate = (userItem: User) => {
+    if (userItem.registeredAt) {
+      return new Date(userItem.registeredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    if ((userItem as any).photoPolicyAgreedAt) {
+      return new Date((userItem as any).photoPolicyAgreedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    return 'Pre-existing';
+  };
+
+  const handleUpdateBookingAttendance = async (bookingId: string, attendedStatus: boolean | null) => {
+    try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      await updateDoc(bookingRef, { attended: attendedStatus });
+    } catch (error) {
+      console.error("Error updating booking attendance:", error);
+    }
+  };
+
   const filteredUsers = users.filter(u => {
     const q = userSearchQuery.toLowerCase();
     if (!q) return true;
@@ -624,6 +761,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       }
     }
     return false;
+  });
+
+  const subTabFilteredUsers = filteredUsers.filter(u => {
+    if (activeUserSubTab === 'all') return true;
+    return u.role === activeUserSubTab;
+  });
+
+  const sortedSubTabUsers = [...subTabFilteredUsers].sort((a, b) => {
+    const aInfo = getSurnameAndFirstname(a.name);
+    const bInfo = getSurnameAndFirstname(b.name);
+    return aInfo.surname.localeCompare(bInfo.surname, 'en', { sensitivity: 'base' }) || 
+           aInfo.firstname.localeCompare(bInfo.firstname, 'en', { sensitivity: 'base' });
   });
 
   return (
@@ -712,7 +861,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               </div>
               <button 
                 onClick={() => {
-                  const headers = ["Name", "Role", "Email", "Department", "Status", "Allergies", "Medical", "Consent"];
+                  const headers = ["Surname", "Firstname", "Role", "Email", "Department", "Status", "Registration Date", "Sessions Booked", "Sessions Attended", "Sessions Absent", "Last Attended Date", "Allergies", "Medical", "Consent"];
                   const rows = users.map(u => {
                     let allergies = "N/A";
                     let medical = "N/A";
@@ -728,12 +877,22 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       consent = u.profile.dataConsent ? "Yes" : "No";
                     }
                     
+                    const nameInfo = getSurnameAndFirstname(u.name);
+                    const stats = getUserAttendanceStats(u.id);
+                    const regDate = formatRegistrationDate(u);
+                    
                     return [
-                      u.name || "Anonymous",
+                      nameInfo.surname,
+                      nameInfo.firstname,
                       u.role,
                       u.email,
                       u.department || "N/A",
                       u.status || "N/A",
+                      regDate,
+                      stats.totalBooked.toString(),
+                      stats.totalAttended.toString(),
+                      stats.totalAbsent.toString(),
+                      stats.lastAttendedStr,
                       allergies,
                       medical,
                       consent
@@ -761,75 +920,132 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             </div>
           </div>
 
+          {/* Separation into different user signups Sub-tabs */}
+          <div className="flex flex-wrap gap-2 mb-8 bg-slate-50 p-2 rounded-3xl w-fit border border-slate-100 shadow-sm">
+            {[
+              { id: 'member', label: 'Members' },
+              { id: 'team', label: 'Team Members' },
+              { id: 'friend', label: 'Friends Of' },
+              { id: 'admin', label: 'Admins' },
+              { id: 'all', label: 'All Signups' }
+            ].map(tab => {
+              const count = tab.id === 'all' 
+                ? users.length 
+                : users.filter(u => u.role === tab.id).length;
+              const isActive = activeUserSubTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveUserSubTab(tab.id as any)}
+                  className={`px-5 py-3 rounded-2xl font-bold text-xs brand-heading uppercase tracking-wider transition-all flex items-center gap-2 ${
+                    isActive 
+                      ? 'bg-white text-brand-orange shadow-md' 
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/50'
+                  }`}
+                >
+                  {tab.label}
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                    isActive ? 'bg-brand-orange/15 text-brand-orange' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-xl overflow-hidden overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[800px]">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Name / Dept</th>
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Email / Role</th>
+                  <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Registration Date</th>
+                  <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Attendance & Activity</th>
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Status / Consent</th>
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.length === 0 ? (
+                {sortedSubTabUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-20 text-center text-slate-400 font-bold brand-heading uppercase text-sm">No matching users found</td>
+                    <td colSpan={6} className="p-20 text-center text-slate-400 font-bold brand-heading uppercase text-sm">No matching users found</td>
                   </tr>
                 ) : (
-                  filteredUsers.map((user) => (
-                    <tr key={user.id} className="border-b border-gray-50 hover:bg-slate-50/50 transition-colors group">
-                      <td className="p-6">
-                        <div className="font-bold text-brand-dark-blue brand-heading flex items-center gap-2">
-                          {user.name || 'Anonymous'}
-                          {(user as any).volunteerNumber && (
-                            <span className="text-[9px] font-black bg-brand-orange/15 text-brand-orange px-2 py-0.5 rounded-md uppercase tracking-wider brand-heading">
-                              ID: {(user as any).volunteerNumber}
+                  sortedSubTabUsers.map((userItem) => {
+                    const nameInfo = getSurnameAndFirstname(userItem.name);
+                    const stats = getUserAttendanceStats(userItem.id);
+                    const regDate = formatRegistrationDate(userItem);
+                    return (
+                      <tr key={userItem.id} className="border-b border-gray-50 hover:bg-slate-50/50 transition-colors group">
+                        <td className="p-6">
+                          <div className="font-bold text-brand-dark-blue brand-heading flex items-center gap-2">
+                            {nameInfo.display}
+                            {(userItem as any).volunteerNumber && (
+                              <span className="text-[9px] font-black bg-brand-orange/15 text-brand-orange px-2 py-0.5 rounded-md uppercase tracking-wider brand-heading">
+                                ID: {(userItem as any).volunteerNumber}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{userItem.department || 'N/A'}</div>
+                        </td>
+                        <td className="p-6">
+                          <div className="text-xs font-medium text-slate-600">{userItem.email}</div>
+                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{userItem.role}</div>
+                        </td>
+                        <td className="p-6 text-xs text-slate-600 font-medium">
+                          {regDate}
+                        </td>
+                        <td className="p-6">
+                          <div className="text-xs font-bold text-slate-700">
+                            Attended: <span className="text-green-600">{stats.totalAttended}</span> / <span className="text-slate-400">{stats.totalBooked}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            Last: <span className="font-medium text-slate-600">{stats.lastAttendedStr}</span>
+                          </div>
+                          {stats.hasLongAbsence && (
+                            <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-[8px] font-black bg-amber-50 text-amber-700 border border-amber-200 uppercase tracking-wider">
+                              ⚠️ Absence Alert {stats.daysSinceLastAttendance ? `(${stats.daysSinceLastAttendance}d)` : ''}
                             </span>
                           )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{user.department || 'N/A'}</div>
-                      </td>
-                      <td className="p-6">
-                        <div className="text-xs font-medium text-slate-600">{user.email}</div>
-                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{user.role}</div>
-                      </td>
-                      <td className="p-6">
-                        <div className="flex flex-col gap-1">
-                          <span className={`inline-block px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider w-fit ${
-                            user.status === 'approved' ? 'bg-green-100 text-green-600' :
-                            user.status === 'rejected' ? 'bg-red-100 text-red-600' :
-                            'bg-orange-100 text-orange-600'
-                          }`}>
-                            {user.status || 'pending'}
-                          </span>
-                          {user.profile && (
-                            <span className={`text-[8px] font-bold uppercase tracking-widest p-1 rounded ${user.profile.dataConsent ? 'text-green-500 bg-green-50' : 'text-red-500 bg-red-50'}`}>
-                              {user.profile.dataConsent ? 'Data Authorized' : 'NO CONSENT'}
+                        </td>
+                        <td className="p-6">
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-block px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider w-fit ${
+                              userItem.status === 'approved' ? 'bg-green-100 text-green-600' :
+                              userItem.status === 'rejected' ? 'bg-red-100 text-red-600' :
+                              'bg-orange-100 text-orange-600'
+                            }`}>
+                              {userItem.status || 'pending'}
                             </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-6">
-                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                          <button 
-                            onClick={() => setSelectedUserDetail(user)}
-                            className="px-4 py-2 bg-brand-light-blue text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
-                          >
-                            View Details
-                          </button>
-                          {user.role === 'team' && user.status !== 'approved' && (
+                            {userItem.profile && (
+                              <span className={`text-[8px] font-bold uppercase tracking-widest p-1 rounded w-fit ${userItem.profile.dataConsent ? 'text-green-500 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+                                {userItem.profile.dataConsent ? 'Data Authorized' : 'NO CONSENT'}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-6">
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
                             <button 
-                              onClick={() => handleUpdateUserStatus(user.id, 'approved')}
-                              className="px-4 py-2 bg-green-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                              onClick={() => setSelectedUserDetail(userItem)}
+                              className="px-4 py-2 bg-brand-light-blue text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
                             >
-                              Approve
+                              View Details
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            {userItem.role === 'team' && userItem.status !== 'approved' && (
+                              <button 
+                                onClick={() => handleUpdateUserStatus(userItem.id, 'approved')}
+                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                              >
+                                Approve
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -838,70 +1054,554 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       )}
       {activeAdminTab === 'bookings' && (
         <div className="animate-fadeIn">
-          <div className="flex justify-between items-center mb-12">
+          {/* Main Bookings Header */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6">
             <div>
               <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Session Registrations</h2>
-              <p className="text-gray-500 font-light mt-1">Live log of all upcoming and past session bookings.</p>
+              <p className="text-gray-500 font-light mt-1">Organize bookings by activity, track attendance, and filter registers over time.</p>
             </div>
-            <button 
-              onClick={handleDownloadBookingsCSV}
-              style={{ backgroundColor: COLORS.secondary }}
-              className="px-8 py-3 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-lg hover:brightness-110 active:scale-95 flex items-center gap-2"
-            >
-              <Icons.Camera /> Download CSV
-            </button>
+            
+            {/* View Switcher Sub-tabs */}
+            <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-100 shadow-sm w-fit">
+              <button
+                onClick={() => {
+                  setActiveBookingView('by-activity');
+                  setSelectedActivityId(null);
+                }}
+                className={`px-5 py-2.5 rounded-xl font-bold text-xs brand-heading uppercase tracking-wider transition-all flex items-center gap-2 ${
+                  activeBookingView === 'by-activity'
+                    ? 'bg-white text-brand-orange shadow-md'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                By Activity Registers
+              </button>
+              <button
+                onClick={() => setActiveBookingView('all-log')}
+                className={`px-5 py-2.5 rounded-xl font-bold text-xs brand-heading uppercase tracking-wider transition-all flex items-center gap-2 ${
+                  activeBookingView === 'all-log'
+                    ? 'bg-white text-brand-orange shadow-md'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Live Bookings Log
+              </button>
+            </div>
           </div>
 
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100">
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date/Time</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Contact</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booking Made</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {bookings.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No registrations found</td>
-                    </tr>
-                  ) : (
-                    bookings.map((booking) => (
-                      <tr key={booking.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="px-8 py-6">
-                          <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
-                          <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">ID: {booking.sessionId.slice(-6)}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p className="text-slate-600 font-bold text-xs">{new Date(booking.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</p>
-                          <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">{booking.sessionTime}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p className="text-brand-dark-blue font-bold text-sm tracking-tight">{booking.participantName}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p className="text-slate-500 text-xs font-light">{booking.bookerName}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p style={{ color: COLORS.orange }} className="font-bold text-xs">{booking.bookerMobile}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
-                            {booking.bookingDate?.toDate ? booking.bookingDate.toDate().toLocaleString() : 'Recent'}
-                          </p>
-                        </td>
+          {activeBookingView === 'by-activity' ? (
+            /* By-Activity Registers View */
+            selectedActivityId === null ? (
+              /* 1. Activities List Selection Grid */
+              <div className="space-y-8">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                  <div className="relative w-full md:max-w-md">
+                    <input
+                      type="text"
+                      placeholder="Search activities by title..."
+                      value={activitySearchQuery}
+                      onChange={(e) => setActivitySearchQuery(e.target.value)}
+                      className="w-full px-5 py-3 bg-white border border-slate-100 rounded-2xl text-xs font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="text-right text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                    Total Activities with Registrations: {
+                      Array.from(new Set(bookings.map(b => b.sessionId))).length
+                    }
+                  </div>
+                </div>
+
+                {(() => {
+                  const uniqueSessionIds = Array.from(new Set(bookings.map(b => b.sessionId)));
+                  const activitiesList = uniqueSessionIds.map(sid => {
+                    const act = activities.find(a => a.id === sid);
+                    const sessionBookings = bookings.filter(b => b.sessionId === sid);
+                    if (act) {
+                      return {
+                        ...act,
+                        bookingsCount: sessionBookings.length,
+                        bookingsList: sessionBookings
+                      };
+                    } else {
+                      const firstB = sessionBookings[0];
+                      return {
+                        id: sid,
+                        title: firstB?.sessionTitle || 'Unknown Session',
+                        description: 'Historical registration recording',
+                        date: firstB?.sessionDate || '',
+                        time: firstB?.sessionTime || '',
+                        location: 'Unknown',
+                        capacity: 0,
+                        bookedCount: sessionBookings.length,
+                        category: 'community' as const,
+                        status: 'past' as const,
+                        bookingsCount: sessionBookings.length,
+                        bookingsList: sessionBookings
+                      };
+                    }
+                  });
+
+                  // Filter by Search Query
+                  const filteredActivitiesList = activitiesList.filter(act => {
+                    if (!activitySearchQuery) return true;
+                    return act.title.toLowerCase().includes(activitySearchQuery.toLowerCase());
+                  });
+
+                  // Sort: newest session date first
+                  const sortedActivitiesList = [...filteredActivitiesList].sort((a, b) => {
+                    return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
+                  });
+
+                  if (sortedActivitiesList.length === 0) {
+                    return (
+                      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-16 text-center">
+                        <p className="text-slate-400 font-bold brand-heading uppercase text-xs tracking-widest">No activities with bookings found</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {sortedActivitiesList.map((act) => {
+                        const attendedCount = act.bookingsList.filter(b => b.attended === true).length;
+                        const absentCount = act.bookingsList.filter(b => b.attended === false).length;
+                        const unmarkedCount = act.bookingsList.filter(b => b.attended === undefined || b.attended === null).length;
+                        
+                        return (
+                          <div 
+                            key={act.id} 
+                            onClick={() => {
+                              setSelectedActivityId(act.id);
+                              setBookingTimeframeFilter('all');
+                              setBookingSearchQuery('');
+                            }}
+                            className="bg-white rounded-[2rem] border border-slate-100 hover:border-brand-orange/30 p-6 shadow-sm hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between"
+                          >
+                            <div>
+                              <div className="flex justify-between items-start gap-4 mb-4">
+                                <span className="inline-block px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider bg-brand-orange/10 text-brand-orange brand-heading">
+                                  {act.category}
+                                </span>
+                                <span className={`inline-block px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider ${
+                                  act.status === 'upcoming' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {act.status}
+                                </span>
+                              </div>
+
+                              <h3 className="font-extrabold text-brand-dark-blue brand-heading text-base leading-tight group-hover:text-brand-orange transition-colors line-clamp-2">
+                                {act.title}
+                              </h3>
+                              
+                              <p className="text-slate-400 font-medium text-[10px] mt-2 flex items-center gap-1.5 uppercase tracking-wider">
+                                📅 {act.date ? new Date(act.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Flexible'}
+                                <span className="text-slate-300">•</span>
+                                🕒 {act.time || 'N/A'}
+                              </p>
+
+                              {act.location && act.location !== 'Unknown' && (
+                                <p className="text-slate-400 text-[10px] mt-1 line-clamp-1">
+                                  📍 {act.location}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="mt-6 pt-5 border-t border-slate-50">
+                              <div className="flex justify-between items-center mb-3">
+                                <span className="text-xs text-slate-500 font-medium">Total Bookings</span>
+                                <span className="px-3 py-1 bg-slate-100 text-slate-700 font-black rounded-lg text-xs">
+                                  {act.bookingsCount}
+                                </span>
+                              </div>
+                              
+                              {/* Quick Attendance Breakdown */}
+                              <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-bold">
+                                <div className="bg-green-50/50 p-1.5 rounded-lg border border-green-100/50 text-green-600">
+                                  <div>{attendedCount}</div>
+                                  <div className="text-[8px] uppercase tracking-wider font-extrabold text-green-500/80">Attended</div>
+                                </div>
+                                <div className="bg-red-50/50 p-1.5 rounded-lg border border-red-100/50 text-red-500">
+                                  <div>{absentCount}</div>
+                                  <div className="text-[8px] uppercase tracking-wider font-extrabold text-red-400">Absent</div>
+                                </div>
+                                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100 text-slate-500">
+                                  <div>{unmarkedCount}</div>
+                                  <div className="text-[8px] uppercase tracking-wider font-extrabold text-slate-400">Unmarked</div>
+                                </div>
+                              </div>
+
+                              <button
+                                style={{ color: COLORS.secondary }}
+                                className="w-full mt-4 text-center py-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all border border-slate-100/50 group-hover:bg-brand-orange group-hover:text-white group-hover:border-transparent"
+                              >
+                                Open Recording Table →
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              /* 2. Detailed Recording Table for Selected Activity */
+              (() => {
+                const selectedActivity = activities.find(a => a.id === selectedActivityId) || {
+                  id: selectedActivityId,
+                  title: bookings.find(b => b.sessionId === selectedActivityId)?.sessionTitle || "Unknown Session",
+                  date: bookings.find(b => b.sessionId === selectedActivityId)?.sessionDate || "",
+                  time: bookings.find(b => b.sessionId === selectedActivityId)?.sessionTime || "",
+                  location: 'N/A',
+                  capacity: 0,
+                  category: 'community' as const,
+                  status: 'past' as const,
+                  description: 'Historical registration recording'
+                };
+
+                const allBookingsForActivity = bookings.filter(b => b.sessionId === selectedActivityId);
+
+                // Apply timeframe and search filters
+                const now = new Date();
+                const filteredBookingsForActivity = allBookingsForActivity.filter(b => {
+                  // Timeframe filter
+                  if (bookingTimeframeFilter !== 'all') {
+                    const bDate = getBookingDateObj(b);
+                    const diffTime = now.getTime() - bDate.getTime();
+                    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+                    if (bookingTimeframeFilter === 'week' && diffDays > 7) return false;
+                    if (bookingTimeframeFilter === 'month' && diffDays > 30) return false;
+                    if (bookingTimeframeFilter === 'year' && diffDays > 365) return false;
+                  }
+
+                  // Search query filter
+                  if (bookingSearchQuery) {
+                    const query = bookingSearchQuery.toLowerCase();
+                    const participantMatch = b.participantName?.toLowerCase().includes(query);
+                    const bookerMatch = b.bookerName?.toLowerCase().includes(query);
+                    return participantMatch || bookerMatch;
+                  }
+
+                  return true;
+                });
+
+                // Sort: Alphabetical order (surname first)
+                const sortedBookingsForActivity = [...filteredBookingsForActivity].sort((a, b) => {
+                  const aInfo = getParticipantSurnameAndFirstname(a.participantName);
+                  const bInfo = getParticipantSurnameAndFirstname(b.participantName);
+                  return aInfo.surname.localeCompare(bInfo.surname, 'en', { sensitivity: 'base' }) || 
+                         aInfo.firstname.localeCompare(bInfo.firstname, 'en', { sensitivity: 'base' });
+                });
+
+                // Attendance stats for filtered list
+                const stats = {
+                  totalBooked: filteredBookingsForActivity.length,
+                  totalAttended: filteredBookingsForActivity.filter(b => b.attended === true).length,
+                  totalAbsent: filteredBookingsForActivity.filter(b => b.attended === false).length,
+                  totalUnmarked: filteredBookingsForActivity.filter(b => b.attended === undefined || b.attended === null).length
+                };
+
+                return (
+                  <div className="space-y-8">
+                    {/* Activity Header Controls */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <button
+                        onClick={() => setSelectedActivityId(null)}
+                        className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs brand-heading uppercase tracking-wider transition-all flex items-center gap-2 border border-slate-200"
+                      >
+                        ← Back to Sessions List
+                      </button>
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => handleDownloadActivityBookingsCSV(selectedActivity.title, sortedBookingsForActivity)}
+                          style={{ backgroundColor: COLORS.secondary }}
+                          className="px-6 py-2.5 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95 flex items-center gap-2"
+                        >
+                          <Icons.Camera /> Export Register CSV
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Activity Details Banner */}
+                    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="px-2.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider bg-brand-orange/15 text-brand-orange brand-heading">
+                              {selectedActivity.category}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">
+                              Session Register
+                            </span>
+                          </div>
+                          <h3 className="text-2xl font-black text-brand-dark-blue brand-heading uppercase tracking-tight">
+                            {selectedActivity.title}
+                          </h3>
+                          <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-slate-400 text-xs font-semibold mt-2 uppercase tracking-wide">
+                            <span>📅 {selectedActivity.date ? new Date(selectedActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Flexible'}</span>
+                            <span className="text-slate-200">•</span>
+                            <span>🕒 {selectedActivity.time || 'N/A'}</span>
+                            {selectedActivity.location && selectedActivity.location !== 'Unknown' && (
+                              <>
+                                <span className="text-slate-200">•</span>
+                                <span>📍 {selectedActivity.location}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Stats Dashboard for selected activity */}
+                        <div className="grid grid-cols-4 gap-3 w-full md:w-auto min-w-[320px]">
+                          <div className="bg-slate-50 border border-slate-100 p-3 rounded-2xl text-center">
+                            <p className="text-[8px] text-slate-400 font-extrabold uppercase tracking-widest">Booked</p>
+                            <p className="text-lg font-black text-slate-700 mt-1">{stats.totalBooked}</p>
+                          </div>
+                          <div className="bg-green-50/50 border border-green-100/50 p-3 rounded-2xl text-center">
+                            <p className="text-[8px] text-green-500 font-extrabold uppercase tracking-widest">Attended</p>
+                            <p className="text-lg font-black text-green-600 mt-1">{stats.totalAttended}</p>
+                          </div>
+                          <div className="bg-red-50/50 border border-red-100/50 p-3 rounded-2xl text-center">
+                            <p className="text-[8px] text-red-500 font-extrabold uppercase tracking-widest">Absent</p>
+                            <p className="text-lg font-black text-red-600 mt-1">{stats.totalAbsent}</p>
+                          </div>
+                          <div className="bg-slate-50 border border-slate-100 p-3 rounded-2xl text-center">
+                            <p className="text-[8px] text-slate-400 font-extrabold uppercase tracking-widest">Pending</p>
+                            <p className="text-lg font-black text-slate-500 mt-1">{stats.totalUnmarked}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Recording Table Filters & Search */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                      
+                      {/* Timeframe selector: week, month, year, all */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-slate-500 font-bold brand-heading uppercase tracking-wider mr-2">Booked Over:</span>
+                        {[
+                          { id: 'all', label: 'All Time' },
+                          { id: 'week', label: 'Last Week' },
+                          { id: 'month', label: 'Last Month' },
+                          { id: 'year', label: 'Last Year' }
+                        ].map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => setBookingTimeframeFilter(t.id as any)}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-bold brand-heading uppercase tracking-wider transition-all border ${
+                              bookingTimeframeFilter === t.id 
+                                ? 'bg-white border-brand-orange text-brand-orange shadow-sm' 
+                                : 'bg-white/50 border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white'
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Registrant Search input */}
+                      <div className="relative w-full md:max-w-xs">
+                        <input
+                          type="text"
+                          placeholder="Search participants..."
+                          value={bookingSearchQuery}
+                          onChange={(e) => setBookingSearchQuery(e.target.value)}
+                          className="w-full px-4 py-2.5 bg-white border border-slate-100 rounded-xl text-xs font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange transition-all shadow-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dedicated Recording Table */}
+                    <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100">
+                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant (Surname First)</th>
+                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker & Contact Info</th>
+                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Registration Date</th>
+                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {sortedBookingsForActivity.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">
+                                  No registered participants found for this filter
+                                </td>
+                              </tr>
+                            ) : (
+                              sortedBookingsForActivity.map((b) => {
+                                const nameInfo = getParticipantSurnameAndFirstname(b.participantName);
+                                const bookingDateStr = b.bookingDate?.toDate ? b.bookingDate.toDate().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent';
+                                
+                                return (
+                                  <tr key={b.id} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="px-8 py-5">
+                                      <p className="text-brand-dark-blue font-black brand-heading text-sm">{nameInfo.display}</p>
+                                      <p className="text-[9px] text-slate-400 font-extrabold uppercase mt-0.5 tracking-wider">ID: {b.id.slice(-6)}</p>
+                                    </td>
+                                    <td className="px-8 py-5">
+                                      <p className="text-slate-700 text-xs font-semibold">{b.bookerName || 'N/A'}</p>
+                                      {b.bookerMobile && (
+                                        <a href={`tel:${b.bookerMobile}`} style={{ color: COLORS.orange }} className="text-[10px] font-bold hover:underline">
+                                          📞 {b.bookerMobile}
+                                        </a>
+                                      )}
+                                    </td>
+                                    <td className="px-8 py-5 text-xs font-semibold text-slate-500">
+                                      {bookingDateStr}
+                                    </td>
+                                    <td className="px-8 py-5">
+                                      <div className="flex justify-center items-center gap-2">
+                                        <button
+                                          onClick={() => handleUpdateBookingAttendance(b.id, true)}
+                                          className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                                            b.attended === true 
+                                              ? 'bg-green-500 text-white shadow-sm scale-105' 
+                                              : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
+                                          }`}
+                                        >
+                                          ✓ Attended
+                                        </button>
+                                        <button
+                                          onClick={() => handleUpdateBookingAttendance(b.id, false)}
+                                          className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                                            b.attended === false 
+                                              ? 'bg-red-500 text-white shadow-sm scale-105' 
+                                              : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
+                                          }`}
+                                        >
+                                          ✗ Absent
+                                        </button>
+                                        <button
+                                          onClick={() => handleUpdateBookingAttendance(b.id, null)}
+                                          className={`px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                            b.attended === undefined || b.attended === null
+                                              ? 'bg-slate-300 text-slate-700' 
+                                              : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                                          }`}
+                                        >
+                                          Reset
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            )
+          ) : (
+            /* Traditional Live Bookings Log View */
+            <div className="space-y-8">
+              <div className="flex justify-between items-center bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                <div>
+                  <h3 className="text-sm font-bold text-brand-dark-blue brand-heading uppercase">Live Bookings Feed</h3>
+                  <p className="text-xs text-slate-400">All registrations listed sequentially as they arrive.</p>
+                </div>
+                <button 
+                  onClick={handleDownloadBookingsCSV}
+                  style={{ backgroundColor: COLORS.secondary }}
+                  className="px-6 py-2.5 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95 flex items-center gap-2"
+                >
+                  <Icons.Camera /> Download All CSV
+                </button>
+              </div>
+
+              <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100">
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date/Time</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Contact</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booking Made</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {bookings.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No registrations found</td>
+                        </tr>
+                      ) : (
+                        bookings.map((booking) => (
+                          <tr key={booking.id} className="hover:bg-slate-50/50 transition-colors group">
+                            <td className="px-8 py-6">
+                              <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
+                              <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">ID: {booking.sessionId.slice(-6)}</p>
+                            </td>
+                            <td className="px-8 py-6">
+                              <p className="text-slate-600 font-bold text-xs">{new Date(booking.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</p>
+                              <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">{booking.sessionTime}</p>
+                            </td>
+                            <td className="px-8 py-6">
+                              <p className="text-brand-dark-blue font-bold text-sm tracking-tight">{booking.participantName}</p>
+                            </td>
+                            <td className="px-8 py-6">
+                              <p className="text-slate-500 text-xs font-light">{booking.bookerName}</p>
+                            </td>
+                            <td className="px-8 py-6">
+                              <p style={{ color: COLORS.orange }} className="font-bold text-xs">{booking.bookerMobile}</p>
+                            </td>
+                            <td className="px-8 py-6">
+                              <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
+                                {booking.bookingDate?.toDate ? booking.bookingDate.toDate().toLocaleString() : 'Recent'}
+                              </p>
+                            </td>
+                            <td className="px-8 py-6">
+                              <div className="flex justify-center items-center gap-2">
+                                <button
+                                  onClick={() => handleUpdateBookingAttendance(booking.id, true)}
+                                  className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                    booking.attended === true 
+                                      ? 'bg-green-500 text-white shadow-sm' 
+                                      : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
+                                  }`}
+                                >
+                                  ✓ Attended
+                                </button>
+                                <button
+                                  onClick={() => handleUpdateBookingAttendance(booking.id, false)}
+                                  className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                    booking.attended === false 
+                                      ? 'bg-red-500 text-white shadow-sm' 
+                                      : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
+                                  }`}
+                                >
+                                  ✗ Absent
+                                </button>
+                                <button
+                                  onClick={() => handleUpdateBookingAttendance(booking.id, null)}
+                                  className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                    booking.attended === undefined || booking.attended === null
+                                      ? 'bg-slate-300 text-slate-700' 
+                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                                  }`}
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -2351,6 +3051,120 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Session History & Attendance Registry */}
+              <div className="mt-12 border-t border-slate-100 pt-12">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                  <div>
+                    <h3 style={{ color: COLORS.secondary }} className="text-2xl font-bold brand-heading uppercase tracking-tight">Session History & Attendance Registry</h3>
+                    <p className="text-gray-500 font-light mt-1">Record and view attendance history for this user's booked sessions.</p>
+                  </div>
+                  <div className="flex gap-4">
+                    {(() => {
+                      const stats = getUserAttendanceStats(selectedUserDetail.id);
+                      return (
+                        <div className="flex items-center gap-3 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest">Booked</p>
+                            <p className="font-bold text-slate-700">{stats.totalBooked}</p>
+                          </div>
+                          <div className="h-6 w-px bg-slate-200"></div>
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest text-green-600">Attended</p>
+                            <p className="font-bold text-green-600">{stats.totalAttended}</p>
+                          </div>
+                          <div className="h-6 w-px bg-slate-200"></div>
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest text-red-600">Absent</p>
+                            <p className="font-bold text-red-500">{stats.totalAbsent}</p>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {(() => {
+                  const userBookings = (bookings || []).filter(b => b.userId === selectedUserDetail.id);
+                  if (userBookings.length === 0) {
+                    return (
+                      <div className="bg-slate-50 p-12 rounded-[2rem] text-center border border-dashed border-slate-200">
+                        <p className="text-slate-400 font-bold brand-heading uppercase text-xs tracking-widest">No session bookings recorded for this account</p>
+                      </div>
+                    );
+                  }
+
+                  const sortedUserBookings = [...userBookings].sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime());
+
+                  return (
+                    <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100">
+                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Details</th>
+                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date & Time</th>
+                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant</th>
+                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {sortedUserBookings.map((b) => (
+                              <tr key={b.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-6 py-4">
+                                  <p className="text-brand-dark-blue font-bold text-sm">{b.sessionTitle}</p>
+                                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">ID: {b.sessionId.slice(-6)}</p>
+                                </td>
+                                <td className="px-6 py-4 text-xs font-semibold text-slate-600">
+                                  {new Date(b.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  <span className="block text-[10px] text-slate-400 font-normal">{b.sessionTime}</span>
+                                </td>
+                                <td className="px-6 py-4 text-xs font-medium text-slate-700">
+                                  {b.participantName}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="flex justify-center items-center gap-2">
+                                    <button
+                                      onClick={() => handleUpdateBookingAttendance(b.id, true)}
+                                      className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                        b.attended === true 
+                                          ? 'bg-green-500 text-white shadow-sm' 
+                                          : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
+                                      }`}
+                                    >
+                                      ✓ Attended
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateBookingAttendance(b.id, false)}
+                                      className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                        b.attended === false 
+                                          ? 'bg-red-500 text-white shadow-sm' 
+                                          : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
+                                      }`}
+                                    >
+                                      ✗ Absent
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateBookingAttendance(b.id, null)}
+                                      className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                        b.attended === undefined || b.attended === null
+                                          ? 'bg-slate-300 text-slate-700' 
+                                          : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                                      }`}
+                                    >
+                                      Reset
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </div>

@@ -75,6 +75,7 @@ export interface User {
   profile?: MemberProfile;
   status?: UserStatus;
   department?: string;
+  registeredAt?: string;
 }
 
 export interface Activity {
@@ -191,6 +192,7 @@ export interface Booking {
   sessionTime: string;
   sessionId: string;
   userId: string;
+  attended?: boolean;
 }
 
 export interface GalleryAlbum {

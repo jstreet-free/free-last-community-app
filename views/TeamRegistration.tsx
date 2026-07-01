@@ -7,7 +7,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 
 interface TeamRegistrationProps {
   user: User;
-  onSubmitted: () => void;
+  onSubmitted: (updatedUser: User) => void;
 }
 
 export const TeamRegistration: React.FC<TeamRegistrationProps> = ({ user, onSubmitted }) => {
@@ -37,17 +37,18 @@ export const TeamRegistration: React.FC<TeamRegistrationProps> = ({ user, onSubm
     setError(null);
     setIsSubmitting(true);
     try {
-      await updateDoc(doc(db, 'users', user.id), {
+      const updatedUserFields = {
         name: formData.name,
         department: `${formData.department} (${formData.role})`,
-        status: 'pending',
+        status: 'pending' as const,
         profileComplete: true,
         photoPolicyAgreed: true,
         photoPolicyAgreedAt: new Date().toISOString()
-      });
+      };
+      await updateDoc(doc(db, 'users', user.id), updatedUserFields);
       localStorage.setItem('freeatlast_photo_policy_confirmed', 'true');
       setSubmitted(true);
-      onSubmitted();
+      onSubmitted({ ...user, ...updatedUserFields });
     } catch (error) {
       console.error("Error submitting team registration:", error);
       setError("Failed to submit registration. Please try again.");

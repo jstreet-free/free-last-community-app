@@ -64,8 +64,8 @@ const App: React.FC = () => {
             await updateDoc(userRef, { role: 'admin', profileComplete: true, status: 'approved' });
           }
 
-          // Ensure team members with profiles are marked as complete
-          if (userData.role === 'team' && userData.name && !userData.profileComplete) {
+          // Ensure team members with profiles or approved status are marked as complete
+          if (userData.role === 'team' && (userData.name || userData.status === 'approved') && !userData.profileComplete) {
             userData.profileComplete = true;
             await updateDoc(userRef, { profileComplete: true });
           }
@@ -491,13 +491,13 @@ const App: React.FC = () => {
            }
         }
            
-        if (updatedRole !== userData.role || updatedStatus !== userData.status || (updatedRole === 'admin' && !userData.profileComplete)) {
+        if (updatedRole !== userData.role || updatedStatus !== userData.status || (updatedRole === 'admin' && !userData.profileComplete) || (updatedStatus === 'approved' && !userData.profileComplete)) {
           const updates: any = { role: updatedRole, status: updatedStatus };
-          if (updatedRole === 'admin') updates.profileComplete = true;
+          if (updatedRole === 'admin' || updatedStatus === 'approved') updates.profileComplete = true;
           await updateDoc(userRef, updates);
         }
 
-        const finalUser = { ...userData, id: uid, role: updatedRole, status: updatedStatus, profileComplete: updatedRole === 'admin' ? true : userData.profileComplete };
+        const finalUser = { ...userData, id: uid, role: updatedRole, status: updatedStatus, profileComplete: (updatedRole === 'admin' || updatedStatus === 'approved') ? true : userData.profileComplete };
         setUser(finalUser);
         localStorage.setItem('freeatlast_v2_user', JSON.stringify(finalUser));
         
@@ -519,6 +519,7 @@ const App: React.FC = () => {
           role: finalRole,
           profileComplete: finalRole === 'friend' || finalRole === 'admin',
           status: finalStatus,
+          registeredAt: new Date().toISOString(),
           profile: finalRole === 'friend' ? {
             registrationType: 'family',
             parentName: extraFields?.name || '',
@@ -884,7 +885,8 @@ const App: React.FC = () => {
 
     if (user && !user.profileComplete && user.role !== 'admin') {
       if (user.role === 'team') {
-        return <TeamRegistration user={user} onSubmitted={() => {
+        return <TeamRegistration user={user} onSubmitted={(updatedUser) => {
+           setUser(updatedUser);
            setNotification("Team profile submitted for review.");
            setActiveTab('home');
         }} />;
@@ -921,7 +923,7 @@ const App: React.FC = () => {
       case 'partners':
         return <Partners assets={assets} partners={partners} impactStories={impactStories} />;
       case 'team':
-        return (user?.role === 'team' || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'wellbeing':
         return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'assets':
