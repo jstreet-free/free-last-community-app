@@ -135,6 +135,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   const [uniqueNumInput, setUniqueNumInput] = useState('');
   const [editStatus, setEditStatus] = useState<UserStatus>('pending');
   const [editRole, setEditRole] = useState<string>('member');
+  const [editProfileComplete, setEditProfileComplete] = useState<boolean>(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Bookings Organization States
   const [activeBookingView, setActiveBookingView] = useState<'by-activity' | 'all-log'>('by-activity');
@@ -144,14 +146,17 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   const [activitySearchQuery, setActivitySearchQuery] = useState('');
 
   useEffect(() => {
+    setConfirmDeleteId(null);
     if (selectedUserDetail) {
       setUniqueNumInput((selectedUserDetail as any).volunteerNumber || '');
       setEditStatus(selectedUserDetail.status || 'pending');
       setEditRole(selectedUserDetail.role || 'member');
+      setEditProfileComplete(selectedUserDetail.profileComplete === true);
     } else {
       setUniqueNumInput('');
       setEditStatus('pending');
       setEditRole('member');
+      setEditProfileComplete(false);
     }
   }, [selectedUserDetail]);
 
@@ -645,12 +650,19 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
-  const handleAdminUpdateUser = async (userId: string, newStatus: UserStatus, newRole: string, newVolunteerNum: string) => {
+  const handleAdminUpdateUser = async (userId: string, newStatus: UserStatus, newRole: string, newVolunteerNum: string, profileComplete: boolean) => {
     try {
+      // Automatically bypass / mark complete if they are assigned as an approved team member
+      let finalProfileComplete = profileComplete;
+      if (newRole === 'team' && newStatus === 'approved') {
+        finalProfileComplete = true;
+      }
+      
       const updatedFields: any = {
         status: newStatus,
         role: newRole,
-        volunteerNumber: newVolunteerNum.trim()
+        volunteerNumber: newVolunteerNum.trim(),
+        profileComplete: finalProfileComplete
       };
       await updateDoc(doc(db, 'users', userId), updatedFields);
       
@@ -659,7 +671,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           ...selectedUserDetail,
           status: newStatus,
           role: newRole,
-          volunteerNumber: newVolunteerNum.trim()
+          volunteerNumber: newVolunteerNum.trim(),
+          profileComplete: finalProfileComplete
         } as any);
       }
     } catch (error) {
@@ -668,12 +681,10 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!window.confirm("Are you absolutely sure you want to delete this user? This action cannot be undone and will permanently remove their profile so they can sign up again.")) {
-      return;
-    }
     try {
       await deleteDoc(doc(db, 'users', userId));
       setSelectedUserDetail(null);
+      setConfirmDeleteId(null);
       alert("User account permanently deleted.");
     } catch (error) {
       console.error("Error deleting user:", error);
@@ -2860,7 +2871,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 <h3 className="text-xs font-black brand-heading uppercase tracking-widest text-brand-orange mb-6 flex items-center gap-2">
                   <Icons.Key className="w-4 h-4" /> Administration Controls
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
                   <div>
                     <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Account Status</label>
                     <select 
@@ -2886,6 +2897,17 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </select>
                   </div>
                   <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Consent & Registration Form</label>
+                    <select 
+                      value={editProfileComplete ? 'complete' : 'incomplete'}
+                      onChange={e => setEditProfileComplete(e.target.value === 'complete')}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs text-brand-dark-blue outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+                    >
+                      <option value="complete">Completed / Bypassed</option>
+                      <option value="incomplete">Needs Registration Form</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Unique Volunteer ID / Code</label>
                     <input 
                       type="text"
@@ -2896,18 +2918,42 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     />
                   </div>
                 </div>
-                <div className="mt-6 flex justify-between items-center">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteUser(selectedUserDetail.id)}
-                    className="px-6 py-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl active:scale-95 transition-all flex items-center gap-2"
-                  >
-                    <Icons.Trash className="w-3.5 h-3.5" /> Delete User Account
-                  </button>
+                <div className="mt-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-4 border-t border-slate-100">
+                  {confirmDeleteId === selectedUserDetail.id ? (
+                    <div className="bg-red-50/80 border border-red-100 p-4 rounded-2xl w-full sm:max-w-md animate-fadeIn">
+                      <p className="text-red-700 text-xs font-bold leading-relaxed mb-3">
+                        ⚠️ Permanent Deletion: This deletes their database profile completely. Note: Because of secure client-side constraints, their auth credentials remain in Firebase. If they sign up again with this same email, they must use their original password (or reset it via "Forgot Password"). Are you sure?
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUser(selectedUserDetail.id)}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold brand-heading uppercase tracking-wider text-[9px] rounded-lg active:scale-95 transition-all shadow-sm"
+                        >
+                          Confirm & Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold brand-heading uppercase tracking-wider text-[9px] rounded-lg transition-all"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(selectedUserDetail.id)}
+                      className="px-6 py-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl active:scale-95 transition-all flex items-center gap-2"
+                    >
+                      <Icons.Trash className="w-3.5 h-3.5" /> Delete User Account
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={async () => {
-                      await handleAdminUpdateUser(selectedUserDetail.id, editStatus, editRole, uniqueNumInput);
+                      await handleAdminUpdateUser(selectedUserDetail.id, editStatus, editRole, uniqueNumInput, editProfileComplete);
                       alert("User account saved successfully!");
                     }}
                     className="px-6 py-3 bg-brand-orange text-white font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-sm"

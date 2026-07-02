@@ -424,9 +424,9 @@ const App: React.FC = () => {
       return;
     }
     
-    let finalEmail = email.trim();
+    let finalEmail = email.trim().toLowerCase();
     if (!finalEmail.includes('@')) {
-      finalEmail = `${finalEmail.toLowerCase().replace(/\s/g, '')}@freeatlast.hub`;
+      finalEmail = `${finalEmail.replace(/\s/g, '')}@freeatlast.hub`;
     }
 
     try {
@@ -450,8 +450,15 @@ const App: React.FC = () => {
           } catch (signUpError: any) {
             if (signUpError.code === 'auth/email-already-in-use') {
               // Sign in existing user to see if they are trying to upgrade or just logging in
-              const signInResult = await signInWithEmailAndPassword(auth, email, password);
-              uid = signInResult.user.uid;
+              try {
+                const signInResult = await signInWithEmailAndPassword(auth, email, password);
+                uid = signInResult.user.uid;
+              } catch (signInError: any) {
+                // Throw custom error to show meaningful instruction instead of "Incorrect password" during SignUp
+                const customError = new Error("This email is already registered. If you are trying to sign up or log in, please enter your correct existing password, or go back to the 'Sign In' page and click 'Forgot Password' to reset it.");
+                (customError as any).code = 'auth/email-already-in-use-wrong-password';
+                throw customError;
+              }
             } else {
               throw signUpError;
             }
@@ -473,7 +480,7 @@ const App: React.FC = () => {
         
         // UPGRADE LOGIC: If a user logs in (or signs up with existing email) and provides a specific role
         // that is more privileged than their current role, we allow upgrade if conditions met.
-        // Or simply, if they selected 'admin' or 'team' during signup and are currently 'member', we upgrade.
+        // Or simply, if they selected 'admin' or 'team' during signup and are currently 'member' or 'friend', we upgrade.
         let updatedRole = userData.role;
         let updatedStatus = userData.status;
         
@@ -485,7 +492,7 @@ const App: React.FC = () => {
            if (role === 'admin' && userData.role !== 'admin') {
              updatedRole = 'admin';
              updatedStatus = 'approved';
-           } else if (role === 'team' && userData.role === 'member') {
+           } else if (role === 'team' && userData.role !== 'team' && userData.role !== 'admin') {
              updatedRole = 'team';
              updatedStatus = 'pending';
            }
@@ -540,7 +547,9 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Auth error details:", error);
       let msg = "";
-      if (error.code === 'permission-denied') msg = "Database access denied. Please contact support.";
+      if (error.code === 'auth/email-already-in-use-wrong-password') {
+        msg = error.message;
+      } else if (error.code === 'permission-denied') msg = "Database access denied. Please contact support.";
       else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') msg = "Incorrect password or email.";
       else if (error.code === 'auth/user-not-found') msg = "No account found. Please Sign Up first.";
       else if (error.code === 'auth/invalid-email') msg = "Invalid format.";
@@ -669,6 +678,7 @@ const App: React.FC = () => {
     const [mode, setMode] = useState<'signin' | 'signup'>('signin');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [role, setRole] = useState<UserRole>('member');
     const [teamPasscode, setTeamPasscode] = useState('');
@@ -682,6 +692,10 @@ const App: React.FC = () => {
     const onSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (mode === 'signup') {
+        if (password !== confirmPassword) {
+          setNotification("Passwords do not match. Please ensure both passwords are identical.");
+          return;
+        }
         if (role === 'team' && teamPasscode !== 'HUB2024') {
           setNotification("Invalid team access code.");
           return;
@@ -693,10 +707,10 @@ const App: React.FC = () => {
       }
       
       // Handle "username" by appending a domain if it doesn't look like an email
-      let finalEmail = email.trim();
+      let finalEmail = email.trim().toLowerCase();
       if (!finalEmail.includes('@')) {
         // Strip all spaces for usernames to ensure valid email format
-        finalEmail = `${finalEmail.toLowerCase().replace(/\s/g, '')}@freeatlast.hub`;
+        finalEmail = `${finalEmail.replace(/\s/g, '')}@freeatlast.hub`;
       }
       
       handleLogin(role, finalEmail, password, mode === 'signup', {
@@ -830,6 +844,23 @@ const App: React.FC = () => {
               </div>
             </div>
 
+            {mode === 'signup' && (
+              <div className="space-y-2 animate-slideDown">
+                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Confirm Password</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"><Icons.Key /></span>
+                  <input 
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="••••••••"
+                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 transition-all placeholder:text-slate-300"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
             {mode === 'signup' && (role === 'team' || role === 'admin') && (
               <div className="space-y-2 animate-slideDown">
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">
@@ -867,7 +898,11 @@ const App: React.FC = () => {
 
           <div className="mt-8 pt-8 border-t border-slate-50 flex flex-col gap-4">
             <button 
-              onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
+              onClick={() => {
+                setMode(mode === 'signin' ? 'signup' : 'signin');
+                setPassword('');
+                setConfirmPassword('');
+              }}
               className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-brand-orange transition-colors brand-heading"
             >
               {mode === 'signin' ? "Need an account? Sign Up" : "Already have an account? Sign In"}
