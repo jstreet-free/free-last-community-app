@@ -667,6 +667,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  const handleDeleteUser = async (userId: string) => {
+    if (!window.confirm("Are you absolutely sure you want to delete this user? This action cannot be undone and will permanently remove their profile so they can sign up again.")) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      setSelectedUserDetail(null);
+      alert("User account permanently deleted.");
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      alert("Failed to delete user: " + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+
   const getSurnameAndFirstname = (fullName: string) => {
     const cleanName = (fullName || '').trim();
     if (!cleanName) return { surname: 'Anonymous', firstname: '', display: 'Anonymous' };
@@ -2882,7 +2896,14 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     />
                   </div>
                 </div>
-                <div className="mt-6 flex justify-end">
+                <div className="mt-6 flex justify-between items-center">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteUser(selectedUserDetail.id)}
+                    className="px-6 py-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl active:scale-95 transition-all flex items-center gap-2"
+                  >
+                    <Icons.Trash className="w-3.5 h-3.5" /> Delete User Account
+                  </button>
                   <button
                     type="button"
                     onClick={async () => {

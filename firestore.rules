@@ -221,7 +221,7 @@ service cloud.firestore {
                      || (isOwnerEmail() && incoming().role == 'admin' && incoming().status == 'approved')
                    );
       allow update: if (isOwner(userId) && (
-                     incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status'])
+                     incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status', 'photoPolicyAgreed', 'photoPolicyAgreedAt'])
                      && (
                        // Team/Members can update status but team can't approve themselves
                        (incoming().status == 'pending' || (existing().role == 'member' && incoming().status == 'approved'))
@@ -230,6 +230,7 @@ service cloud.firestore {
                      || (isOwnerEmail() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'profileComplete']))
                    ))
                    || (isAdmin() && isValidUser(incoming()));
+      allow delete: if isAdmin();
     }
 
     match /team_logs/{logId} {
