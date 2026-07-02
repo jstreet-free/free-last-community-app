@@ -1,8 +1,8 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import config from "../firebase-applet-config.json";
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const app = initializeApp(config);
+export const db = (config as any).firestoreDatabaseId ? getFirestore(app, (config as any).firestoreDatabaseId) : getFirestore(app);
 export const auth = getAuth(app);
