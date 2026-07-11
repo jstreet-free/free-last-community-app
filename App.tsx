@@ -54,24 +54,77 @@ const App: React.FC = () => {
       if (firebaseUser) {
         // Sync with Firestore
         const userRef = doc(db, 'users', firebaseUser.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          let userData = { ...userSnap.data(), id: firebaseUser.uid } as User;
-          
-          // Force admin status for owner
-          if (firebaseUser.email?.toLowerCase() === 'jstreet@freeatlast.st' && (userData.role !== 'admin' || !userData.profileComplete)) {
-            userData = { ...userData, role: 'admin', profileComplete: true, status: 'approved' };
-            await updateDoc(userRef, { role: 'admin', profileComplete: true, status: 'approved' });
-          }
+        try {
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            let userData = { ...userSnap.data(), id: firebaseUser.uid } as User;
+            
+            // Force admin status for owner
+            if (firebaseUser.email?.toLowerCase() === 'jstreet@freeatlast.st' && (userData.role !== 'admin' || !userData.profileComplete)) {
+              userData = { ...userData, role: 'admin', profileComplete: true, status: 'approved' };
+              try {
+                await updateDoc(userRef, { role: 'admin', profileComplete: true, status: 'approved' });
+              } catch (err) {
+                console.error("Owner upgrade failed to write to Firestore:", err);
+              }
+            }
 
-          // Ensure team members with profiles or approved status are marked as complete
-          if (userData.role === 'team' && (userData.name || userData.status === 'approved') && !userData.profileComplete) {
-            userData.profileComplete = true;
-            await updateDoc(userRef, { profileComplete: true });
+            // Ensure team members with profiles or approved status are marked as complete
+            if (userData.role === 'team' && (userData.name || userData.status === 'approved') && !userData.profileComplete) {
+              userData.profileComplete = true;
+              try {
+                await updateDoc(userRef, { profileComplete: true });
+              } catch (err) {
+                console.error("Team complete update failed to write to Firestore:", err);
+              }
+            }
+            
+            setUser(userData);
+            localStorage.setItem('freeatlast_v2_user', JSON.stringify(userData));
+          } else {
+            // User authenticated but not found in Firestore. Check cache.
+            const saved = localStorage.getItem('freeatlast_v2_user');
+            if (saved) {
+              const cachedUser = JSON.parse(saved);
+              if (cachedUser.id === firebaseUser.uid) {
+                setUser(cachedUser);
+                return;
+              }
+            }
+            // Fallback for new user with missing profile document
+            const defaultUser: User = {
+              id: firebaseUser.uid,
+              name: firebaseUser.email?.split('@')[0] || 'User',
+              email: firebaseUser.email || '',
+              role: 'member',
+              profileComplete: false,
+              status: 'approved',
+              registeredAt: new Date().toISOString()
+            };
+            setUser(defaultUser);
           }
-          
-          setUser(userData);
-          localStorage.setItem('freeatlast_v2_user', JSON.stringify(userData));
+        } catch (error) {
+          console.error("Firestore error in onAuthStateChanged (potentially Quota Exceeded):", error);
+          // Graceful fallback to cached user profile
+          const saved = localStorage.getItem('freeatlast_v2_user');
+          if (saved) {
+            const cachedUser = JSON.parse(saved);
+            if (cachedUser.id === firebaseUser.uid) {
+              setUser(cachedUser);
+              return;
+            }
+          }
+          // Ultimate safe fallback
+          const defaultUser: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.email?.split('@')[0] || 'User',
+            email: firebaseUser.email || '',
+            role: 'member',
+            profileComplete: true,
+            status: 'approved',
+            registeredAt: new Date().toISOString()
+          };
+          setUser(defaultUser);
         }
       } else {
         setUser(null);
@@ -87,21 +140,66 @@ const App: React.FC = () => {
     return localStorage.getItem('freeatlast_photo_policy_confirmed') === 'true';
   });
   
-  const [assets, setAssets] = useState(DEFAULT_IMAGES);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [partners, setPartners] = useState<Partner[]>([]);
-  const [impactStories, setImpactStories] = useState<ImpactStory[]>([]);
-  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-  const [sessionRegistrations, setSessionRegistrations] = useState<Booking[]>([]);
-  const [userRegistrations, setUserRegistrations] = useState<Booking[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [teamLogs, setTeamLogs] = useState<TeamLog[]>([]);
-  const [wellbeingLogs, setWellbeingLogs] = useState<MoodLog[]>([]);
-  const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
-  const [mailLogs, setMailLogs] = useState<MailLog[]>([]);
-  const [caseStudyRequests, setCaseStudyRequests] = useState<CaseStudyRequest[]>([]);
-  const [caseStudies, setCaseStudies] = useState<CaseStudy[]>([]);
+  const [assets, setAssets] = useState(() => {
+    const saved = localStorage.getItem('cached_assets');
+    return saved ? JSON.parse(saved) : DEFAULT_IMAGES;
+  });
+  const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
+    const saved = localStorage.getItem('cached_announcements');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [activities, setActivities] = useState<Activity[]>(() => {
+    const saved = localStorage.getItem('cached_activities');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [partners, setPartners] = useState<Partner[]>(() => {
+    const saved = localStorage.getItem('cached_partners');
+    return saved ? JSON.parse(saved) : SAMPLE_PARTNERS;
+  });
+  const [impactStories, setImpactStories] = useState<ImpactStory[]>(() => {
+    const saved = localStorage.getItem('cached_impact_stories');
+    return saved ? JSON.parse(saved) : SAMPLE_IMPACT_STORIES;
+  });
+  const [inquiries, setInquiries] = useState<Inquiry[]>(() => {
+    const saved = localStorage.getItem('cached_inquiries');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [sessionRegistrations, setSessionRegistrations] = useState<Booking[]>(() => {
+    const saved = localStorage.getItem('cached_session_registrations');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [userRegistrations, setUserRegistrations] = useState<Booking[]>(() => {
+    const saved = localStorage.getItem('cached_user_registrations');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [allUsers, setAllUsers] = useState<User[]>(() => {
+    const saved = localStorage.getItem('cached_all_users');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [teamLogs, setTeamLogs] = useState<TeamLog[]>(() => {
+    const saved = localStorage.getItem('cached_team_logs');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [wellbeingLogs, setWellbeingLogs] = useState<MoodLog[]>(() => {
+    const saved = localStorage.getItem('cached_wellbeing_logs');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>(() => {
+    const saved = localStorage.getItem('cached_gallery_albums');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [mailLogs, setMailLogs] = useState<MailLog[]>(() => {
+    const saved = localStorage.getItem('cached_mail_logs');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [caseStudyRequests, setCaseStudyRequests] = useState<CaseStudyRequest[]>(() => {
+    const saved = localStorage.getItem('cached_case_study_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [caseStudies, setCaseStudies] = useState<CaseStudy[]>(() => {
+    const saved = localStorage.getItem('cached_case_studies');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Persist user and tab
@@ -121,6 +219,9 @@ const App: React.FC = () => {
         newAssets[doc.id] = doc.data().value;
       });
       setAssets(newAssets);
+      localStorage.setItem('cached_assets', JSON.stringify(newAssets));
+    }, (error) => {
+      console.error("Assets snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -134,6 +235,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Announcement);
       });
       setAnnouncements(items);
+      localStorage.setItem('cached_announcements', JSON.stringify(items));
+    }, (error) => {
+      console.error("Announcements snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -146,6 +250,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Activity);
       });
       setActivities(items);
+      localStorage.setItem('cached_activities', JSON.stringify(items));
+    }, (error) => {
+      console.error("Activities snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -158,7 +265,11 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Partner);
       });
       // Fallback to SAMPLE_PARTNERS if empty (to seed initial load)
-      setPartners(items.length > 0 ? items : SAMPLE_PARTNERS);
+      const finalItems = items.length > 0 ? items : SAMPLE_PARTNERS;
+      setPartners(finalItems);
+      localStorage.setItem('cached_partners', JSON.stringify(finalItems));
+    }, (error) => {
+      console.error("Partners snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -171,7 +282,11 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as ImpactStory);
       });
       // Fallback to SAMPLE_IMPACT_STORIES if empty
-      setImpactStories(items.length > 0 ? items : SAMPLE_IMPACT_STORIES);
+      const finalItems = items.length > 0 ? items : SAMPLE_IMPACT_STORIES;
+      setImpactStories(finalItems);
+      localStorage.setItem('cached_impact_stories', JSON.stringify(finalItems));
+    }, (error) => {
+      console.error("Impact stories snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -184,6 +299,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Inquiry);
       });
       setInquiries(items);
+      localStorage.setItem('cached_inquiries', JSON.stringify(items));
+    }, (error) => {
+      console.error("Inquiries snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -200,6 +318,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Booking);
       });
       setSessionRegistrations(items);
+      localStorage.setItem('cached_session_registrations', JSON.stringify(items));
+    }, (error) => {
+      console.error("Session registrations snapshot error:", error);
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -222,6 +343,9 @@ const App: React.FC = () => {
       });
       setBookings(ids);
       setUserRegistrations(fullBookings);
+      localStorage.setItem('cached_user_registrations', JSON.stringify(fullBookings));
+    }, (error) => {
+      console.error("User bookings snapshot error:", error);
     });
     return () => unsubscribe();
   }, [user?.id]);
@@ -235,6 +359,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as User);
       });
       setAllUsers(items);
+      localStorage.setItem('cached_all_users', JSON.stringify(items));
+    }, (error) => {
+      console.error("Users snapshot error:", error);
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -261,6 +388,7 @@ const App: React.FC = () => {
       // Sort client-side by date desc
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setTeamLogs(items);
+      localStorage.setItem('cached_team_logs', JSON.stringify(items));
     }, (error) => {
       console.error("Team logs sync error:", error);
       if (error.message.includes('index')) {
@@ -291,6 +419,7 @@ const App: React.FC = () => {
       // Sort client-side by date desc
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setWellbeingLogs(items);
+      localStorage.setItem('cached_wellbeing_logs', JSON.stringify(items));
     }, (error) => {
       console.error("Wellbeing logs sync error:", error);
     });
@@ -306,6 +435,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as GalleryAlbum);
       });
       setGalleryAlbums(items);
+      localStorage.setItem('cached_gallery_albums', JSON.stringify(items));
+    }, (error) => {
+      console.error("Gallery albums snapshot error:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -319,6 +451,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as CaseStudyRequest);
       });
       setCaseStudyRequests(items);
+      localStorage.setItem('cached_case_study_requests', JSON.stringify(items));
     }, (error) => {
       console.error("Case study requests sync error:", error);
     });
@@ -342,6 +475,7 @@ const App: React.FC = () => {
       });
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setCaseStudies(items);
+      localStorage.setItem('cached_case_studies', JSON.stringify(items));
     }, (error) => {
       console.error("Case studies sync error:", error);
     });
@@ -390,6 +524,9 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as MailLog);
       });
       setMailLogs(items);
+      localStorage.setItem('cached_mail_logs', JSON.stringify(items));
+    }, (error) => {
+      console.error("Mail logs snapshot error:", error);
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -526,8 +663,11 @@ const App: React.FC = () => {
           role: finalRole,
           profileComplete: finalRole === 'friend' || finalRole === 'admin',
           status: finalStatus,
-          registeredAt: new Date().toISOString(),
-          profile: finalRole === 'friend' ? {
+          registeredAt: new Date().toISOString()
+        };
+
+        if (finalRole === 'friend') {
+          newUser.profile = {
             registrationType: 'family',
             parentName: extraFields?.name || '',
             parentEmail: email || '',
@@ -537,8 +677,8 @@ const App: React.FC = () => {
             dataConsent: true,
             mobileNumber: extraFields?.mobile || '',
             businessName: extraFields?.businessName || ''
-          } as any : undefined
-        };
+          } as any;
+        }
         await setDoc(userRef, newUser);
         setUser(newUser);
         

@@ -11,7 +11,10 @@ interface VideosProps {
 }
 
 export const Videos: React.FC<VideosProps> = ({ user }) => {
-  const [videos, setVideos] = useState<YouTubeVideo[]>([]);
+  const [videos, setVideos] = useState<YouTubeVideo[]>(() => {
+    const saved = localStorage.getItem('cached_youtube_videos');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingVideo, setEditingVideo] = useState<YouTubeVideo | null>(null);
@@ -34,6 +37,7 @@ export const Videos: React.FC<VideosProps> = ({ user }) => {
       // Sort newest first
       list.sort((a,b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
       setVideos(list);
+      localStorage.setItem('cached_youtube_videos', JSON.stringify(list));
       setLoading(false);
     }, (error) => {
       console.error("Failed to load videos:", error);

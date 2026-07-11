@@ -12,8 +12,14 @@ interface FriendsOfProps {
 }
 
 export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
-  const [needs, setNeeds] = useState<FriendNeed[]>([]);
-  const [offers, setOffers] = useState<FriendOffer[]>([]);
+  const [needs, setNeeds] = useState<FriendNeed[]>(() => {
+    const saved = localStorage.getItem('cached_friend_needs');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [offers, setOffers] = useState<FriendOffer[]>(() => {
+    const saved = localStorage.getItem('cached_friend_offers');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [loadingNeeds, setLoadingNeeds] = useState(true);
   const [loadingOffers, setLoadingOffers] = useState(true);
   const [broadcastingId, setBroadcastingId] = useState<string | null>(null);
@@ -43,7 +49,9 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
         list.push({ id: doc.id, ...doc.data() } as FriendNeed);
       });
       // Sort: active / un-sent first, then by date newest
-      setNeeds(list.sort((a,b) => b.date.localeCompare(a.date)));
+      const sortedNeeds = list.sort((a,b) => b.date.localeCompare(a.date));
+      setNeeds(sortedNeeds);
+      localStorage.setItem('cached_friend_needs', JSON.stringify(sortedNeeds));
       setLoadingNeeds(false);
     }, (error) => {
       console.error("Failed to load center needs", error);
@@ -62,7 +70,9 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
       snapshot.forEach(doc => {
         list.push({ id: doc.id, ...doc.data() } as FriendOffer);
       });
-      setOffers(list.sort((a,b) => b.date.localeCompare(a.date)));
+      const sortedOffers = list.sort((a,b) => b.date.localeCompare(a.date));
+      setOffers(sortedOffers);
+      localStorage.setItem('cached_friend_offers', JSON.stringify(sortedOffers));
       setLoadingOffers(false);
     }, (error) => {
       console.error("Failed to load offers", error);
