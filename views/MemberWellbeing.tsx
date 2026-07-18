@@ -10,6 +10,7 @@ import { handleFirestoreError, OperationType } from '../services/firestoreUtils'
 interface MemberWellbeingProps {
   user: User;
   logs: MoodLog[];
+  allUsers?: User[];
 }
 
 const EMOTIONS = [
@@ -22,7 +23,7 @@ const EMOTIONS = [
   { label: 'Upset', emoji: '😭', color: 'bg-red-100 text-red-700', type: 'negative' },
 ];
 
-export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) => {
+export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs, allUsers }) => {
   const [selectedEmotion, setSelectedEmotion] = useState('');
   const [impactText, setImpactText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,10 +41,23 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) 
     const aiFeedback = await getWellbeingSupport(selectedEmotion, impactText);
     
     try {
+      const userPhone = user.profile?.parentMobile || 
+                        user.profile?.teenagerDetails?.ownMobile || 
+                        (user.profile as any)?.mobileNumber || 
+                        (user as any).mobile || 
+                        (user as any).phone || 
+                        'Not provided';
+      const userEmail = user.email || 
+                        user.profile?.parentEmail || 
+                        user.profile?.teenagerDetails?.ownEmail || 
+                        'Not provided';
+
       // 1. Save to wellbeing_logs
       const logData = {
         memberId: user.id,
         memberName: user.name || 'Anonymous',
+        memberPhone: userPhone,
+        memberEmail: userEmail,
         date: new Date().toISOString(),
         emotion: selectedEmotion,
         impactText: impactText,
@@ -198,35 +212,80 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) 
         <div className="space-y-10">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-900 brand-heading uppercase tracking-tight">
-              {user.role === 'admin' ? "Team Journey Logs" : "Your Journey"}
+              {(user.role === 'admin' || user.role === 'team') ? "Team Journey Logs" : "Your Journey"}
             </h2>
-            {user.role === 'admin' && (
-              <span className="text-[10px] font-black text-brand-orange uppercase tracking-widest p-2 bg-brand-orange/5 rounded-lg">Admin View</span>
+            {(user.role === 'admin' || user.role === 'team') && (
+              <span className="text-[10px] font-black text-brand-orange uppercase tracking-widest p-2 bg-brand-orange/5 rounded-lg">Staff View</span>
             )}
           </div>
           <div className="space-y-6">
-            {logs.map(log => (
-              <div key={log.id} className="relative pl-8 border-l-2 border-slate-100 py-2 group">
-                <div className={`absolute -left-[9px] top-6 w-4 h-4 rounded-full border-4 border-white shadow-sm transition-colors ${log.isUrgent ? 'bg-red-500' : 'bg-brand-light-blue'}`}></div>
-                
-                <div className={`bg-white p-8 rounded-[2rem] shadow-sm border transition-all hover:shadow-md ${log.isUrgent ? 'border-red-100 bg-red-50/10' : 'border-gray-50'}`}>
-                  <div className="flex items-center justify-between mb-6">
-                     <div className="flex items-center gap-4">
-                       <div className="flex flex-col">
-                         {user.role === 'admin' && (
-                           <span className="text-[9px] font-black text-brand-dark-blue uppercase tracking-widest brand-heading mb-1">{log.memberName}</span>
-                         )}
-                         <div className="flex items-center gap-3">
-                           <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest brand-heading ${EMOTIONS.find(e => e.label === log.emotion)?.color || 'bg-slate-100 text-slate-700'}`}>
-                             {log.emotion} {EMOTIONS.find(e => e.label === log.emotion)?.emoji}
-                           </span>
-                           <span className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
-                             {new Date(log.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                           </span>
+            {logs.map(log => {
+              // Resolve contact details
+              let resolvedPhone = (log as any).memberPhone || '';
+              let resolvedEmail = (log as any).memberEmail || '';
+              
+              if (allUsers) {
+                const matchedUser = allUsers.find(u => u.id === log.memberId);
+                if (matchedUser) {
+                  resolvedPhone = matchedUser.profile?.parentMobile || 
+                                  matchedUser.profile?.teenagerDetails?.ownMobile || 
+                                  (matchedUser.profile as any)?.mobileNumber || 
+                                  (matchedUser as any).mobile || 
+                                  (matchedUser as any).phone || 
+                                  resolvedPhone;
+                  resolvedEmail = matchedUser.email || 
+                                  matchedUser.profile?.parentEmail || 
+                                  matchedUser.profile?.teenagerDetails?.ownEmail || 
+                                  resolvedEmail;
+                }
+              }
+
+              return (
+                <div key={log.id} className="relative pl-8 border-l-2 border-slate-100 py-2 group">
+                  <div className={`absolute -left-[9px] top-6 w-4 h-4 rounded-full border-4 border-white shadow-sm transition-colors ${log.isUrgent ? 'bg-red-500' : 'bg-brand-light-blue'}`}></div>
+                  
+                  <div className={`bg-white p-8 rounded-[2rem] shadow-sm border transition-all hover:shadow-md ${log.isUrgent ? 'border-red-100 bg-red-50/10' : 'border-gray-50'}`}>
+                    <div className="flex items-center justify-between mb-6">
+                       <div className="flex items-center gap-4">
+                         <div className="flex flex-col">
+                           {(user.role === 'admin' || user.role === 'team') && (
+                             <div className="flex flex-col gap-1.5 mb-2">
+                               <span className="text-sm font-black text-brand-dark-blue uppercase tracking-wider brand-heading">{log.memberName}</span>
+                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs mt-1">
+                                 {resolvedPhone && resolvedPhone !== 'Not provided' && (
+                                   <a 
+                                     href={`tel:${resolvedPhone}`} 
+                                     className="flex items-center gap-1.5 text-brand-orange hover:text-brand-orange/80 font-bold bg-brand-orange/10 px-3 py-1.5 rounded-full transition-all hover:scale-105"
+                                     title="Click to call parent or teenager"
+                                   >
+                                     <Icons.Phone />
+                                     <span>{resolvedPhone}</span>
+                                   </a>
+                                 )}
+                                 {resolvedEmail && resolvedEmail !== 'Not provided' && (
+                                   <a 
+                                     href={`mailto:${resolvedEmail}`} 
+                                     className="flex items-center gap-1.5 text-slate-600 hover:text-slate-800 font-semibold bg-slate-100 px-3 py-1.5 rounded-full transition-all hover:scale-105"
+                                     title="Click to send email"
+                                   >
+                                     <Icons.Mail />
+                                     <span>{resolvedEmail}</span>
+                                   </a>
+                                 )}
+                               </div>
+                             </div>
+                           )}
+                           <div className="flex items-center gap-3">
+                             <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest brand-heading ${EMOTIONS.find(e => e.label === log.emotion)?.color || 'bg-slate-100 text-slate-700'}`}>
+                               {log.emotion} {EMOTIONS.find(e => e.label === log.emotion)?.emoji}
+                             </span>
+                             <span className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
+                               {new Date(log.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                             </span>
+                           </div>
                          </div>
                        </div>
-                     </div>
-                     {user.role === 'admin' && (
+                     {(user.role === 'admin' || user.role === 'team') && (
                         <div className="flex gap-2">
                           <button 
                             onClick={() => {
@@ -286,7 +345,8 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs }) 
                   )}
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </div>
       )}

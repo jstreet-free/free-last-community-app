@@ -26,6 +26,7 @@ interface AdminAssetsProps {
   wellbeingLogs?: MoodLog[];
   galleryAlbums: GalleryAlbum[];
   mailLogs?: MailLog[];
+  warnings?: any[];
   caseStudyRequests?: CaseStudyRequest[];
   caseStudies?: CaseStudy[];
 }
@@ -46,10 +47,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   wellbeingLogs = [],
   galleryAlbums,
   mailLogs = [],
+  warnings = [],
   caseStudyRequests = [],
   caseStudies = [],
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs'>(() => {
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs' | 'warnings'>(() => {
     return (localStorage.getItem('admin_active_tab') as any) || 'activities';
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -706,10 +708,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
   const getUserAttendanceStats = (userId: string) => {
     const userB = (bookings || []).filter(b => b.userId === userId);
-    const totalBooked = userB.length;
-    const attended = userB.filter(b => b.attended === true);
+    const activeB = userB.filter(b => b.status !== 'cancelled');
+    const totalBooked = activeB.length;
+    const totalCancelled = userB.filter(b => b.status === 'cancelled').length;
+    const attended = activeB.filter(b => b.attended === true);
     const totalAttended = attended.length;
-    const totalAbsent = userB.filter(b => b.attended === false).length;
+    const totalAbsent = activeB.filter(b => b.attended === false).length;
     
     let lastAttendedStr = 'Never';
     let daysSinceLastAttendance = null;
@@ -733,6 +737,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     
     return {
       totalBooked,
+      totalCancelled,
       totalAttended,
       totalAbsent,
       lastAttendedStr,
@@ -826,6 +831,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           { id: 'archive', label: 'Photo Archive', icon: <Icons.Camera /> },
           { id: 'users', label: 'User Hub', icon: <Icons.User /> },
           { id: 'mail', label: 'Mail Monitor', icon: <Icons.Megaphone /> },
+          { id: 'warnings', label: 'Warnings & Alerts ⚠️', icon: <Icons.AlertTriangle /> },
           { id: 'images', label: 'Brand Images', icon: <Icons.Camera /> }
         ].map((tab) => (
           <button
@@ -847,7 +853,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
       {activeAdminTab === 'wellbeing' && (
         <div className="animate-fadeIn">
-          <MemberWellbeing user={user} logs={wellbeingLogs} />
+          <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={users} />
         </div>
       )}
 
@@ -3145,6 +3151,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest text-red-600">Absent</p>
                             <p className="font-bold text-red-500">{stats.totalAbsent}</p>
                           </div>
+                          <div className="h-6 w-px bg-slate-200"></div>
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest text-orange-500">Cancelled</p>
+                            <p className="font-bold text-orange-500">{stats.totalCancelled || 0}</p>
+                          </div>
                         </div>
                       );
                     })()}
@@ -3190,38 +3201,46 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                   {b.participantName}
                                 </td>
                                 <td className="px-6 py-4">
-                                  <div className="flex justify-center items-center gap-2">
-                                    <button
-                                      onClick={() => handleUpdateBookingAttendance(b.id, true)}
-                                      className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                        b.attended === true 
-                                          ? 'bg-green-500 text-white shadow-sm' 
-                                          : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
-                                      }`}
-                                    >
-                                      ✓ Attended
-                                    </button>
-                                    <button
-                                      onClick={() => handleUpdateBookingAttendance(b.id, false)}
-                                      className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                        b.attended === false 
-                                          ? 'bg-red-500 text-white shadow-sm' 
-                                          : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
-                                      }`}
-                                    >
-                                      ✗ Absent
-                                    </button>
-                                    <button
-                                      onClick={() => handleUpdateBookingAttendance(b.id, null)}
-                                      className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                        b.attended === undefined || b.attended === null
-                                          ? 'bg-slate-300 text-slate-700' 
-                                          : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
-                                      }`}
-                                    >
-                                      Reset
-                                    </button>
-                                  </div>
+                                  {b.status === 'cancelled' ? (
+                                    <div className="flex justify-center">
+                                      <span className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 text-red-500 border border-red-100">
+                                        Cancelled by Member
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex justify-center items-center gap-2">
+                                      <button
+                                        onClick={() => handleUpdateBookingAttendance(b.id, true)}
+                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                          b.attended === true 
+                                            ? 'bg-green-500 text-white shadow-sm' 
+                                            : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
+                                        }`}
+                                      >
+                                        ✓ Attended
+                                      </button>
+                                      <button
+                                        onClick={() => handleUpdateBookingAttendance(b.id, false)}
+                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                          b.attended === false 
+                                            ? 'bg-red-500 text-white shadow-sm' 
+                                            : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
+                                        }`}
+                                      >
+                                        ✗ Absent
+                                      </button>
+                                      <button
+                                        onClick={() => handleUpdateBookingAttendance(b.id, null)}
+                                        className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                          b.attended === undefined || b.attended === null
+                                            ? 'bg-slate-300 text-slate-700' 
+                                            : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                                        }`}
+                                      >
+                                        Reset
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             ))}
@@ -3311,6 +3330,99 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               If status is <strong>ERROR</strong>, check the "Details/Errors" column above for specific mail server reject messages (e.g. invalid password or unauthorized IP).
             </p>
           </div>
+        </div>
+      )}
+
+      {activeAdminTab === 'warnings' && (
+        <div className="animate-fadeIn">
+          <div className="mb-12">
+            <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">System Warnings & Alerts</h2>
+            <p className="text-gray-500 font-light mt-1">Real-time auditing of registration blocks, postcode exceptions, and confirmed dietary/allergy booking conflicts.</p>
+          </div>
+
+          {warnings.length === 0 ? (
+            <div className="bg-emerald-50 border border-emerald-100 rounded-[2.5rem] p-12 text-center space-y-4">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto text-emerald-600">
+                <Icons.Check className="h-8 w-8" />
+              </div>
+              <h3 className="text-xl font-bold text-emerald-900 brand-heading uppercase">All Clear!</h3>
+              <p className="text-emerald-700 font-light text-sm max-w-md mx-auto">No security violations, postcode exceptions, or active dietary booking conflicts have been logged.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {warnings.map((warn: any) => {
+                const isDiet = warn.type === 'dietary_conflict_confirmed';
+                const isBlocked = warn.type === 'member_registration_blocked';
+                
+                return (
+                  <div 
+                    key={warn.id}
+                    className={`bg-white border-2 rounded-[2rem] p-8 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row justify-between gap-6 ${
+                      isDiet ? 'border-amber-100' : isBlocked ? 'border-rose-100' : 'border-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-start gap-6">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
+                        isDiet ? 'bg-amber-50 text-amber-600' : isBlocked ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-500'
+                      }`}>
+                        {isDiet ? (
+                          <Icons.AlertTriangle className="h-7 w-7" />
+                        ) : (
+                          <Icons.Shield className="h-7 w-7" />
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-full ${
+                            isDiet ? 'bg-amber-100 text-amber-800' : isBlocked ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-800'
+                          }`}>
+                            {isDiet ? 'Dietary Override' : 'Registration Stopped'}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400">
+                            {warn.timestamp ? new Date(warn.timestamp).toLocaleString() : 'N/A'}
+                          </span>
+                        </div>
+                        <h4 className="text-lg font-black text-slate-800 brand-heading uppercase tracking-tight">
+                          {warn.title}
+                        </h4>
+                        <p className="text-slate-600 font-light text-sm max-w-2xl">
+                          {warn.message}
+                        </p>
+                        
+                        {warn.details && (
+                          <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 mt-4 text-xs font-mono text-slate-600 space-y-1">
+                            {warn.details.address && <p><strong>Address:</strong> {warn.details.address}</p>}
+                            {warn.details.postcode && <p><strong>Postcode:</strong> {warn.details.postcode}</p>}
+                            {warn.details.foodChoice && <p><strong>Food Chosen:</strong> {warn.details.foodChoice}</p>}
+                            {warn.details.sessionTitle && <p><strong>Activity:</strong> {warn.details.sessionTitle}</p>}
+                            {warn.details.bookerName && <p><strong>Booked By:</strong> {warn.details.bookerName}</p>}
+                            {warn.details.bookerMobile && <p><strong>Contact Mobile:</strong> {warn.details.bookerMobile}</p>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="flex md:flex-col justify-end items-end shrink-0 pt-4 md:pt-0">
+                      <button
+                        onClick={async () => {
+                          if (confirm("Are you sure you want to dismiss this warning?")) {
+                            try {
+                              await deleteDoc(doc(db, 'warnings', warn.id));
+                            } catch (err) {
+                              console.error("Failed to delete warning:", err);
+                            }
+                          }
+                        }}
+                        className="px-6 py-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-all uppercase brand-heading tracking-wider"
+                      >
+                        Dismiss Alert
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

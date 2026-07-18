@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { User, MemberProfile, ChildProfile } from '../types';
 import { Icons, COLORS } from '../constants';
+import { db } from '../services/firebase';
+import { collection, addDoc } from 'firebase/firestore';
 
 interface MemberRegistrationProps {
   user: User;
@@ -16,11 +18,14 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     return user.profile?.registrationType || null;
   });
   
+  const [isBlocked, setIsBlocked] = useState(false);
+
   // Parent / Common Info
   const [parentInfo, setParentInfo] = useState({
     parentName: user.profile?.parentName || user.name || '',
     familyName: user.profile?.familyName || '',
     address: user.profile?.address || '',
+    postcode: user.profile?.postcode || '',
     parentEmail: user.profile?.parentEmail || user.email || '',
     parentMobile: user.profile?.parentMobile || '',
     livingWith: user.profile?.livingWith || '',
@@ -158,15 +163,97 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     setChildren(children.filter((_, i) => i !== index));
   };
 
+  const handleRegisterAsFriend = () => {
+    onComplete({
+      registrationType: 'family',
+      parentName: parentInfo.parentName || user.name || '',
+      address: parentInfo.address,
+      postcode: parentInfo.postcode,
+      parentEmail: parentInfo.parentEmail || user.email || '',
+      parentMobile: parentInfo.parentMobile,
+      livingWith: parentInfo.livingWith,
+      isFriendSignup: true,
+    } as any);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    
+    const address = parentInfo.address || '';
+    const postcode = parentInfo.postcode || '';
+
+    const hasNechells = address.toLowerCase().includes('nechells') || postcode.toLowerCase().includes('nechells');
+    
+    // Check if string contains word "B7" (with boundaries, e.g. not B70, B72 etc.) or B7 followed by digit
+    const hasB7Postcode = (str: string) => {
+      return /\bB7\b/i.test(str) || /\bB7\s*\d/i.test(str);
+    };
+    
+    const isPostcodeB7 = hasB7Postcode(postcode) || hasB7Postcode(address);
+    const isAddressNechells = hasNechells;
+
+    if (!isPostcodeB7 || !isAddressNechells) {
+      const personName = registrationType === 'teenager' ? teenagerInfo.name : parentInfo.parentName;
+      
+      const raiseWarning = async () => {
+        try {
+          await addDoc(collection(db, 'warnings'), {
+            type: 'member_registration_blocked',
+            title: 'Member Registration Stopped',
+            message: `${personName} tried to register as a Member but was stopped because they do not live in Nechells or have a B7 postcode.`,
+            personName,
+            userEmail: user.email || parentInfo.parentEmail || '',
+            details: {
+              address,
+              postcode,
+              registrationType
+            },
+            timestamp: new Date().toISOString()
+          });
+
+          await addDoc(collection(db, 'mail'), {
+            to: ['jstreet@freeatlast.co.uk'],
+            replyTo: user.email || 'no-reply@freeatlast.co.uk',
+            message: {
+              subject: `⚠️ WARNING: Member Registration Blocked (${personName})`,
+              text: `Warning: A member registration was stopped because they do not live in Nechells or have a B7 postcode.\nName: ${personName}\nEmail: ${user.email || parentInfo.parentEmail}\nAddress: ${address}\nPostcode: ${postcode}\nType: ${registrationType}`,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #e11d48; padding: 20px; border-radius: 15px;">
+                  <h2 style="color: #e11d48; margin-top: 0;">⚠️ Member Registration Blocked</h2>
+                  <p>A user tried to register as a Member but was stopped because they do not live in Nechells or have a B7 postcode.</p>
+                  <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                  <div style="background: #fff5f5; padding: 15px; border-radius: 10px; border: 1px solid #fee2e2;">
+                    <p style="margin: 5px 0;"><strong>Name:</strong> ${personName}</p>
+                    <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email || parentInfo.parentEmail}</p>
+                    <p style="margin: 5px 0;"><strong>Address:</strong> ${address}</p>
+                    <p style="margin: 5px 0;"><strong>Postcode:</strong> ${postcode || 'None'}</p>
+                    <p style="margin: 5px 0;"><strong>Registration Type:</strong> ${registrationType}</p>
+                    <p style="margin: 5px 0;"><strong>Attempt Date:</strong> ${new Date().toLocaleString()}</p>
+                  </div>
+                  <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                    free@last Hub Automated Security Alert
+                  </p>
+                </div>
+              `
+            }
+          });
+        } catch (err) {
+          console.error("Error raising warning:", err);
+        }
+      };
+
+      raiseWarning();
+      setIsBlocked(true);
+      return;
+    }
     
     if (registrationType === 'teenager') {
       onComplete({
         registrationType: 'teenager',
         parentName: parentInfo.parentName,
         address: parentInfo.address,
+        postcode: parentInfo.postcode,
         parentEmail: parentInfo.parentEmail,
         parentMobile: parentInfo.parentMobile,
         livingWith: parentInfo.livingWith,
@@ -185,6 +272,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         parentName: parentInfo.parentName,
         familyName: parentInfo.familyName,
         address: parentInfo.address,
+        postcode: parentInfo.postcode,
         parentEmail: parentInfo.parentEmail,
         parentMobile: parentInfo.parentMobile,
         livingWith: parentInfo.livingWith,
@@ -268,13 +356,24 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                   />
                 </div>
               )}
-              <div className="md:col-span-2">
+              <div className="md:col-span-1">
                 <InputLabel>Home Address</InputLabel>
                 <textarea 
                   required rows={2}
                   className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-light"
                   value={parentInfo.address}
                   onChange={e => setParentInfo({...parentInfo, address: e.target.value})}
+                  placeholder="Street name & number"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <InputLabel>Home Postcode</InputLabel>
+                <input 
+                  type="text" required
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
+                  value={parentInfo.postcode || ''}
+                  onChange={e => setParentInfo({...parentInfo, postcode: e.target.value})}
+                  placeholder="e.g. B7 4AA"
                 />
               </div>
               <div>
@@ -853,6 +952,51 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         );
     }
   };
+
+  if (isBlocked) {
+    return (
+      <div className="max-w-2xl mx-auto p-12 bg-white rounded-3xl shadow-2xl border-2 border-rose-100 text-center space-y-8 animate-fadeIn">
+        <div style={{ backgroundColor: '#fff1f2' }} className="w-24 h-24 rounded-full flex items-center justify-center mx-auto text-rose-500 shadow-inner">
+          <Icons.Shield className="h-12 w-12" />
+        </div>
+        <div className="space-y-4">
+          <h2 style={{ color: COLORS.secondary }} className="text-3xl font-black uppercase tracking-tight brand-heading">
+            Registration Stopped
+          </h2>
+          <div className="text-left bg-rose-50/50 p-6 rounded-2xl border border-rose-100/50 text-slate-600 font-light space-y-4">
+            <p className="font-bold text-rose-700">
+              Only residents who live in Nechells and have a B7 postcode are permitted to register as hub members.
+            </p>
+            <p className="text-sm">
+              We noticed your submitted address or postcode does not meet these criteria. To protect community resources, registrations are limited to:
+            </p>
+            <ul className="list-disc pl-5 text-sm space-y-1">
+              <li>Residents living within the <strong>Nechells</strong> area.</li>
+              <li>Postcodes beginning with <strong>B7</strong>.</li>
+              <li>Or individuals who have had a scheduled <strong>Home Visit</strong> from a member of the free@last team.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="pt-4 space-y-4">
+          <button
+            onClick={handleRegisterAsFriend}
+            style={{ backgroundColor: COLORS.orange }}
+            className="w-full py-5 rounded-2xl text-white font-bold text-base brand-heading uppercase tracking-[0.15em] shadow-lg hover:brightness-110 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all"
+          >
+            Sign up as a Friend instead
+          </button>
+          
+          <button
+            onClick={() => setIsBlocked(false)}
+            className="w-full py-4 rounded-xl text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all"
+          >
+            Go Back & Update Address
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-2 md:px-4 py-8 md:py-16">

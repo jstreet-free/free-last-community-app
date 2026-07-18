@@ -32,6 +32,8 @@ export interface MemberProfile {
   parentName: string;
   familyName?: string; // for family
   address: string;
+  postcode?: string;
+  isFriendSignup?: boolean;
   parentEmail: string;
   parentMobile: string;
   livingWith: string;
@@ -92,6 +94,8 @@ export interface Activity {
   flickrAlbumUrl?: string;
   status: 'upcoming' | 'past';
   imageUrl?: string;
+  includesFood?: boolean;
+  foodOptions?: string;
 }
 
 export interface TeamLog {
@@ -192,7 +196,11 @@ export interface Booking {
   sessionTime: string;
   sessionId: string;
   userId: string;
-  attended?: boolean;
+  attended?: boolean | null;
+  status?: 'booked' | 'cancelled';
+  foodChoice?: string;
+  foodConflictConfirmed?: boolean;
+  foodConflictWarningRaised?: boolean;
 }
 
 export interface GalleryAlbum {
@@ -276,4 +284,16 @@ export interface YouTubeVideo {
   description?: string;
   addedAt: string;
 }
+
+export interface AdminWarning {
+  id: string;
+  type: 'member_registration_blocked' | 'food_allergy_conflict';
+  title: string;
+  message: string;
+  personName: string;
+  userEmail: string;
+  details?: any;
+  timestamp: string;
+}
+
 

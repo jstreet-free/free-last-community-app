@@ -30,7 +30,9 @@
         "category": { "type": "string", "enum": ["youth", "community", "sports", "education"] },
         "flickrAlbumUrl": { "type": "string" },
         "status": { "type": "string", "enum": ["upcoming", "past"] },
-        "imageUrl": { "type": "string" }
+        "imageUrl": { "type": "string" },
+        "includesFood": { "type": "boolean" },
+        "foodOptions": { "type": "string" }
       },
       "required": ["title", "description", "date", "time", "location", "capacity", "bookedCount", "category", "status"]
     },
@@ -129,7 +131,12 @@
         "sessionDate": { "type": "string" },
         "sessionTime": { "type": "string" },
         "sessionId": { "type": "string" },
-        "userId": { "type": "string" }
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["booked", "cancelled"] },
+        "attended": { "type": "boolean" },
+        "foodChoice": { "type": "string" },
+        "foodConflictConfirmed": { "type": "boolean" },
+        "foodConflictWarningRaised": { "type": "boolean" }
       },
       "required": ["bookerName", "participantName", "bookerMobile", "sessionId"]
     },
@@ -285,6 +292,22 @@
         "addedAt": { "type": "string" }
       },
       "required": ["title", "url", "addedAt"]
+    },
+    "warning": {
+      "title": "Admin Warning",
+      "description": "A system warning or alert triggered by member registrations or food allergies.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["member_registration_blocked", "food_allergy_conflict"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "personName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "details": { "type": "object" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["type", "title", "message", "personName", "userEmail", "timestamp"]
     }
   },
   "firestore": {
@@ -359,6 +382,10 @@
     "/youtube_videos/{videoId}": {
       "schema": "youtubeVideo",
       "description": "Collection of YouTube link highlights for the media center."
+    },
+    "/warnings/{warningId}": {
+      "schema": "warning",
+      "description": "Collection of system warnings and member alerts."
     }
   }
 }

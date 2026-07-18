@@ -192,6 +192,10 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('cached_mail_logs');
     return saved ? JSON.parse(saved) : [];
   });
+  const [warnings, setWarnings] = useState<any[]>(() => {
+    const saved = localStorage.getItem('cached_warnings');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [caseStudyRequests, setCaseStudyRequests] = useState<CaseStudyRequest[]>(() => {
     const saved = localStorage.getItem('cached_case_study_requests');
     return saved ? JSON.parse(saved) : [];
@@ -362,6 +366,24 @@ const App: React.FC = () => {
       localStorage.setItem('cached_all_users', JSON.stringify(items));
     }, (error) => {
       console.error("Users snapshot error:", error);
+    });
+    return () => unsubscribe();
+  }, [user?.role]);
+
+  // Sync warnings from Firestore (Admin only)
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    const unsubscribe = onSnapshot(collection(db, 'warnings'), (snapshot) => {
+      const items: any[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() });
+      });
+      // Sort client-side
+      items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setWarnings(items);
+      localStorage.setItem('cached_warnings', JSON.stringify(items));
+    }, (error) => {
+      console.error("Warnings snapshot error:", error);
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -712,21 +734,24 @@ const App: React.FC = () => {
         ? (profile as any).name 
         : (profile.registrationType === 'family' 
             ? (profile.parentName || profile.familyName) 
-            : (profile.registrationType === 'teenager' ? profile.teenagerDetails.name : profile.parentName));
+            : (profile.registrationType === 'teenager' ? profile.teenagerDetails?.name : profile.parentName));
 
       // Preserve status if already approved
       const newStatus = user.status === 'approved' ? 'approved' : (isTeam ? 'pending' : 'approved');
+      const isFriend = profile.isFriendSignup || false;
+      const finalRole = isFriend ? 'friend' : user.role;
 
       await updateDoc(userRef, {
         name,
         profile,
         profileComplete: true,
-        status: newStatus
+        status: newStatus,
+        role: finalRole
       });
 
-      setUser({ ...user, name, profile, profileComplete: true, status: newStatus });
+      setUser({ ...user, name, profile, profileComplete: true, status: newStatus, role: finalRole });
       setActiveTab('home');
-      setNotification("Registration successful! Welcome to the hub.");
+      setNotification(isFriend ? "Friend registration successful! Welcome to the hub." : "Registration successful! Welcome to the hub.");
       setTimeout(() => setNotification(null), 5000);
     } catch (error) {
       console.error("Registration finalization error:", error);
@@ -741,7 +766,13 @@ const App: React.FC = () => {
     setActiveTab('home');
   };
 
-  const handleBookActivity = async (detail: { participantName: string; bookerMobile: string; activity: Activity }) => {
+  const handleBookActivity = async (detail: { 
+    participantName: string; 
+    bookerMobile: string; 
+    activity: Activity;
+    foodChoice?: string;
+    foodConflictConfirmed?: boolean;
+  }) => {
     if (!user) return;
     
     // Explicitly check photo policy for members/team
@@ -752,6 +783,60 @@ const App: React.FC = () => {
     
     const path = 'bookings';
     try {
+      // Raise a warning note with admin if they confirmed against their medical/dietary info
+      if (detail.foodConflictConfirmed) {
+        try {
+          await addDoc(collection(db, 'warnings'), {
+            type: 'dietary_conflict_confirmed',
+            title: 'Dietary Conflict Confirmed',
+            message: `${detail.participantName} booked ${detail.activity.title} and chose "${detail.foodChoice || 'Unknown'}" which conflicts with their registered dietary/allergies information.`,
+            personName: detail.participantName,
+            userEmail: user.email || '',
+            details: {
+              sessionTitle: detail.activity.title,
+              sessionDate: detail.activity.date,
+              sessionTime: detail.activity.time,
+              sessionId: detail.activity.id,
+              foodChoice: detail.foodChoice || '',
+              bookerName: user.name,
+              bookerMobile: detail.bookerMobile,
+            },
+            timestamp: new Date().toISOString()
+          });
+
+          // Send warning email to admin as well
+          await addDoc(collection(db, 'mail'), {
+            to: ['jstreet@freeatlast.co.uk'],
+            replyTo: user.email,
+            message: {
+              subject: `⚠️ DIETARY WARNING: Booking Conflict for ${detail.participantName}`,
+              text: `Warning: A booking was completed with a confirmed dietary conflict!\nParticipant: ${detail.participantName}\nActivity: ${detail.activity.title}\nFood Chosen: ${detail.foodChoice}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #ea580c; padding: 20px; border-radius: 15px;">
+                  <h2 style="color: #ea580c; margin-top: 0;">⚠️ Dietary Booking Conflict Confirmed</h2>
+                  <p>A participant was registered with a food option that conflicts with their medical or dietary information on file, and the booker explicitly bypassed the alert.</p>
+                  <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                  <div style="background: #fffbeb; padding: 15px; border-radius: 10px; border: 1px solid #fef3c7;">
+                    <p style="margin: 5px 0;"><strong>Participant:</strong> ${detail.participantName}</p>
+                    <p style="margin: 5px 0;"><strong>Activity:</strong> ${detail.activity.title}</p>
+                    <p style="margin: 5px 0;"><strong>Chosen Food Option:</strong> <span style="color: #ea580c; font-weight: bold;">${detail.foodChoice || 'None'}</span></p>
+                    <p style="margin: 5px 0;"><strong>Booker Name:</strong> ${user.name}</p>
+                    <p style="margin: 5px 0;"><strong>Contact Mobile:</strong> ${detail.bookerMobile}</p>
+                    <p style="margin: 5px 0;"><strong>Contact Email:</strong> ${user.email}</p>
+                    <p style="margin: 5px 0;"><strong>Date & Time:</strong> ${detail.activity.date} @ ${detail.activity.time}</p>
+                  </div>
+                  <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                    free@last Hub Automated Dietary Alert
+                  </p>
+                </div>
+              `
+            }
+          });
+        } catch (err) {
+          console.error("Error raising admin warning for dietary conflict:", err);
+        }
+      }
+
       // 1. Save to global bookings collection for admin log
       await addDoc(collection(db, path), {
         bookerName: user.name,
@@ -763,7 +848,11 @@ const App: React.FC = () => {
         sessionTime: detail.activity.time,
         sessionId: detail.activity.id,
         userId: user.id,
-        targetEmail: 'jstreet@freeatlast.co.uk'
+        targetEmail: 'jstreet@freeatlast.co.uk',
+        status: 'booked',
+        foodChoice: detail.foodChoice || '',
+        foodConflictConfirmed: detail.foodConflictConfirmed || false,
+        foodConflictWarningRaised: detail.foodConflictConfirmed || false,
       });
 
       // 2. Trigger email for the booking
@@ -811,6 +900,64 @@ const App: React.FC = () => {
       } catch (err) {
         console.error("Firestore Error logged:", err);
       }
+    }
+  };
+
+  const handleCancelBooking = async (bookingId: string) => {
+    if (!user) return;
+    try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      const bookingSnap = await getDoc(bookingRef);
+      if (!bookingSnap.exists()) {
+        throw new Error("Booking record not found.");
+      }
+      
+      const bookingData = bookingSnap.data() as Booking;
+      
+      // 1. Update status to 'cancelled'
+      await updateDoc(bookingRef, {
+        status: 'cancelled'
+      });
+
+      // 2. Decrement activity count
+      const activityRef = doc(db, 'activities', bookingData.sessionId);
+      await updateDoc(activityRef, {
+        bookedCount: increment(-1)
+      });
+
+      // 3. Trigger cancellation email alert
+      await addDoc(collection(db, 'mail'), {
+        to: ['jstreet@freeatlast.co.uk'],
+        replyTo: user.email || 'no-reply@freeatlast.co.uk',
+        message: {
+          subject: `Cancelled Booking: ${bookingData.sessionTitle}`,
+          text: `Booking Cancelled for ${bookingData.sessionTitle}\nParticipant: ${bookingData.participantName}\nDate: ${bookingData.sessionDate}\nTime: ${bookingData.sessionTime}\nCancelled by: ${user.name}\nEmail: ${user.email}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+              <h2 style="color: #7e2b33;">Booking Cancelled</h2>
+              <p>A registration has been cancelled for <strong>${bookingData.sessionTitle}</strong>.</p>
+              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+              <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                <p style="margin: 5px 0;"><strong>Session:</strong> ${bookingData.sessionTitle}</p>
+                <p style="margin: 5px 0;"><strong>Session Date:</strong> ${bookingData.sessionDate}</p>
+                <p style="margin: 5px 0;"><strong>Session Time:</strong> ${bookingData.sessionTime}</p>
+                <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${bookingData.participantName}</p>
+                <p style="margin: 5px 0;"><strong>Cancelled By:</strong> ${user.name}</p>
+                <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+              </div>
+              <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                System generated cancellation alert
+              </p>
+            </div>
+          `
+        }
+      });
+
+      setNotification(`Successfully cancelled booking for ${bookingData.participantName}`);
+      setTimeout(() => setNotification(null), 3000);
+    } catch (error: any) {
+      console.error("Cancellation error:", error);
+      setNotification(`Failed to cancel booking: ${error.message}`);
     }
   };
 
@@ -1080,6 +1227,7 @@ const App: React.FC = () => {
         return <Activities 
           user={user} 
           onBook={handleBookActivity} 
+          onCancel={handleCancelBooking}
           bookings={bookings} 
           allBookings={user?.role === 'admin' ? sessionRegistrations : userRegistrations}
           assets={assets} 
@@ -1100,7 +1248,7 @@ const App: React.FC = () => {
       case 'team':
         return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'wellbeing':
-        return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
@@ -1119,6 +1267,7 @@ const App: React.FC = () => {
             wellbeingLogs={wellbeingLogs}
             galleryAlbums={galleryAlbums}
             mailLogs={mailLogs}
+            warnings={warnings}
             caseStudyRequests={caseStudyRequests}
             caseStudies={caseStudies}
           />

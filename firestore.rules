@@ -208,7 +208,8 @@ service cloud.firestore {
     match /bookings/{bookingId} {
       allow create: if isSignedIn() && isValidBooking(incoming());
       allow read: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
-      allow delete, update: if isAdmin();
+      allow delete: if isAdmin();
+      allow update: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
     }
 
     match /users/{userId} {
@@ -287,6 +288,11 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isAdmin() && isValidYouTubeVideo(incoming());
       allow delete: if isAdmin();
+    }
+
+    match /warnings/{warningId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
   }
 }
