@@ -33,6 +33,8 @@ export const Activities: React.FC<ActivitiesProps> = ({
   setActiveTab 
 }) => {
   const [filter, setFilter] = useState<'all' | 'youth' | 'community' | 'sports' | 'education'>('all');
+  const [selectedDay, setSelectedDay] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [viewMode, setViewMode] = useState<'explore' | 'history'>('explore');
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [bookingForm, setBookingForm] = useState({
@@ -42,6 +44,59 @@ export const Activities: React.FC<ActivitiesProps> = ({
   });
   const [showFoodConflictWarning, setShowFoodConflictWarning] = useState<string | null>(null);
   const [conflictConfirmed, setConflictConfirmed] = useState(false);
+
+  const getEffectiveSession = (activity: Activity) => {
+    if (activity.frequency !== 'weekly') {
+      return { 
+        date: activity.date,
+        isBookable: activity.status === 'upcoming' 
+      };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let occurrenceDate = new Date(activity.date);
+    occurrenceDate.setHours(0, 0, 0, 0);
+
+    // If the initial date is in the past, move it forward week by week until it's today or in the future
+    while (occurrenceDate < today) {
+      occurrenceDate.setDate(occurrenceDate.getDate() + 7);
+    }
+
+    return {
+      date: occurrenceDate.toISOString().split('T')[0],
+      isBookable: true
+    };
+  };
+
+  const getDayOfWeek = (activity: Activity): string => {
+    const effective = getEffectiveSession(activity);
+    const dateStr = effective.date || activity.date;
+    if (!dateStr) return '';
+    const dateParts = dateStr.split('T')[0].split('-');
+    if (dateParts.length === 3) {
+      const year = parseInt(dateParts[0], 10);
+      const month = parseInt(dateParts[1], 10) - 1;
+      const day = parseInt(dateParts[2], 10);
+      const d = new Date(year, month, day, 12, 0, 0);
+      return d.toLocaleDateString('en-GB', { weekday: 'long' });
+    }
+    const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-GB', { weekday: 'long' });
+  };
+
+  const DAYS_OF_WEEK = [
+    { id: 'all', label: 'All Days' },
+    { id: 'Monday', label: 'Mondays' },
+    { id: 'Tuesday', label: 'Tuesdays' },
+    { id: 'Wednesday', label: 'Wednesdays' },
+    { id: 'Thursday', label: 'Thursdays' },
+    { id: 'Friday', label: 'Fridays' },
+    { id: 'Saturday', label: 'Saturdays' },
+    { id: 'Sunday', label: 'Sundays' }
+  ];
 
   const getDietaryAllergies = (name: string): string => {
     if (!user || !user.profile) return '';
@@ -168,9 +223,47 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
   const upcomingActivities = activities.filter(a => a.status === 'upcoming');
 
-  const filteredActivities = filter === 'all' 
-    ? upcomingActivities 
-    : upcomingActivities.filter(a => a.category === filter);
+  const getCountForDay = (dayId: string) => {
+    let baseList = upcomingActivities;
+    if (filter !== 'all') {
+      baseList = baseList.filter(a => a.category === filter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      baseList = baseList.filter(a => 
+        a.title.toLowerCase().includes(q) || 
+        a.description.toLowerCase().includes(q) ||
+        (a.location && a.location.toLowerCase().includes(q))
+      );
+    }
+    if (dayId === 'all') return baseList.length;
+    return baseList.filter(a => getDayOfWeek(a) === dayId).length;
+  };
+
+  const filteredActivities = upcomingActivities.filter(activity => {
+    // 1. Category filter
+    if (filter !== 'all' && activity.category !== filter) {
+      return false;
+    }
+    // 2. Day of week filter
+    if (selectedDay !== 'all') {
+      const day = getDayOfWeek(activity);
+      if (day !== selectedDay) {
+        return false;
+      }
+    }
+    // 3. Search query filter
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesTitle = activity.title.toLowerCase().includes(q);
+      const matchesDesc = activity.description.toLowerCase().includes(q);
+      const matchesLocation = activity.location?.toLowerCase().includes(q);
+      if (!matchesTitle && !matchesDesc && !matchesLocation) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   const getActivityImage = (activity: Activity) => {
     if (activity.imageUrl) return activity.imageUrl;
@@ -181,31 +274,6 @@ export const Activities: React.FC<ActivitiesProps> = ({
       '4': assets.CAMPFIRE
     };
     return images[activity.id] || assets.YOUTH_HOODIES;
-  };
-
-  const getEffectiveSession = (activity: Activity) => {
-    if (activity.frequency !== 'weekly') {
-      return { 
-        date: activity.date,
-        isBookable: activity.status === 'upcoming' 
-      };
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    let occurrenceDate = new Date(activity.date);
-    occurrenceDate.setHours(0, 0, 0, 0);
-
-    // If the initial date is in the past, move it forward week by week until it's today or in the future
-    while (occurrenceDate < today) {
-      occurrenceDate.setDate(occurrenceDate.getDate() + 7);
-    }
-
-    return {
-      date: occurrenceDate.toISOString().split('T')[0],
-      isBookable: true
-    };
   };
 
   const getCategoryColor = (cat: string) => {
@@ -223,32 +291,11 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 animate-fadeIn">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-16">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-12">
         <div>
           <h1 style={{ color: COLORS.secondary }} className="text-5xl font-bold mb-4 brand-heading uppercase tracking-tight">Session Booking</h1>
           <p className="text-gray-500 text-lg font-light">Explore and join our weekly community activities at the Nechells Hub.</p>
         </div>
-        
-        {viewMode === 'explore' && (
-          <div className="flex flex-wrap gap-2">
-            {['all', 'youth', 'community', 'sports', 'education'].map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f as any)}
-                style={{ 
-                  backgroundColor: filter === f ? COLORS.secondary : '#ffffff',
-                  color: filter === f ? '#ffffff' : COLORS.secondary,
-                  borderColor: COLORS.secondary
-                }}
-                className={`px-6 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border-2 brand-heading ${
-                  filter === f ? 'shadow-lg scale-105' : 'hover:bg-gray-50'
-                }`}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {user && (
@@ -387,63 +434,232 @@ export const Activities: React.FC<ActivitiesProps> = ({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {filteredActivities.map((activity) => {
-            const effective = getEffectiveSession(activity);
-            const effectiveDate = effective.date;
-            
-            // Calculate dynamic booking count for this specific occurrence (excluding cancelled)
-            const occurrenceBookings = allBookings.filter(
-              b => b.sessionId === activity.id && b.sessionDate === effectiveDate && b.status !== 'cancelled'
-            );
-            const currentBookedCount = occurrenceBookings.length;
-            
-            // Check if current user is booked for THIS specific occurrence (excluding cancelled)
-            const matchedBooking = user ? allBookings.find(b => 
-              b.sessionId === activity.id && 
-              b.sessionDate === effectiveDate && 
-              b.userId === user.id &&
-              b.status !== 'cancelled'
-            ) : null;
-            const isBooked = !!matchedBooking;
+        <div className="space-y-8">
+          <div className="bg-slate-50/80 border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-200/60">
+              <div>
+                <h3 style={{ color: COLORS.secondary }} className="text-sm font-black brand-heading uppercase tracking-wider flex items-center gap-2">
+                  <span style={{ color: COLORS.orange }}><Icons.Calendar /></span>
+                  Filter & Search Sessions
+                </h3>
+                <p className="text-xs text-slate-500 font-light mt-0.5">
+                  Select a day of the week or category to easily navigate available bookable sessions.
+                </p>
+              </div>
 
-            const isFull = currentBookedCount >= activity.capacity;
-            const catColor = getCategoryColor(activity.category);
-
-            const bookableActivity = {
-              ...activity,
-              date: effectiveDate,
-              bookedCount: currentBookedCount
-            };
-
-            return (
-              <div key={activity.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row hover:shadow-xl transition-all">
-                <div className="md:w-2/5 h-56 md:h-auto relative overflow-hidden">
-                  <img 
-                    src={getActivityImage(activity)} 
-                    alt={activity.title}
-                    className="w-full h-full object-cover"
+              {/* Search Input & Reset Button */}
+              <div className="flex items-center gap-3 w-full lg:w-auto">
+                <div className="relative flex-grow lg:w-72">
+                  <input
+                    type="text"
+                    placeholder="Search session title or topic..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:border-brand-orange transition-all shadow-inner"
                   />
-                  <div style={{ backgroundColor: catColor }} className="absolute top-4 left-4 text-white px-4 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest shadow-lg brand-heading">
-                    {activity.category}
-                    {activity.frequency === 'weekly' && " • Weekly"}
-                  </div>
+                  <span className="absolute left-3 top-3 text-slate-400 pointer-events-none text-xs">
+                    🔍
+                  </span>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
+
+                {(filter !== 'all' || selectedDay !== 'all' || searchQuery !== '') && (
+                  <button
+                    onClick={() => {
+                      setFilter('all');
+                      setSelectedDay('all');
+                      setSearchQuery('');
+                    }}
+                    className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-wider brand-heading transition-all whitespace-nowrap shadow-sm"
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Day of the Week Selector */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400 brand-heading uppercase tracking-widest flex items-center gap-1.5">
+                  📅 Select Day of the Week
+                </label>
+                {selectedDay !== 'all' && (
+                  <button
+                    onClick={() => setSelectedDay('all')}
+                    className="text-[10px] font-bold text-brand-orange brand-heading uppercase hover:underline"
+                  >
+                    Show All Days
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {DAYS_OF_WEEK.map((dayItem) => {
+                  const isSelected = selectedDay === dayItem.id;
+                  const count = getCountForDay(dayItem.id);
+
+                  return (
+                    <button
+                      key={dayItem.id}
+                      onClick={() => setSelectedDay(dayItem.id)}
+                      style={{
+                        backgroundColor: isSelected ? COLORS.orange : '#ffffff',
+                        color: isSelected ? '#ffffff' : COLORS.secondary,
+                        borderColor: isSelected ? COLORS.orange : '#e2e8f0'
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold brand-heading transition-all border flex items-center gap-2 ${
+                        isSelected ? 'shadow-md scale-102 font-extrabold' : 'hover:bg-slate-100'
+                      } ${count === 0 && !isSelected ? 'opacity-40' : ''}`}
+                    >
+                      <span>{dayItem.label}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                        isSelected ? 'bg-white/30 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Category Selector */}
+            <div className="space-y-2 pt-3 border-t border-slate-200/60">
+              <label className="text-[10px] font-black text-slate-400 brand-heading uppercase tracking-widest">
+                Category
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'all', label: 'All Categories' },
+                  { id: 'youth', label: 'Youth' },
+                  { id: 'community', label: 'Community' },
+                  { id: 'sports', label: 'Sports' },
+                  { id: 'education', label: 'Education' }
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setFilter(cat.id as any)}
+                    style={{
+                      backgroundColor: filter === cat.id ? COLORS.secondary : '#ffffff',
+                      color: filter === cat.id ? '#ffffff' : COLORS.secondary,
+                      borderColor: filter === cat.id ? COLORS.secondary : '#e2e8f0'
+                    }}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border brand-heading ${
+                      filter === cat.id ? 'shadow-md scale-102' : 'hover:bg-slate-100'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {filteredActivities.length === 0 ? (
+            <div className="bg-white rounded-3xl border-2 border-dashed border-slate-200 py-16 px-6 text-center shadow-sm">
+              <div className="w-16 h-16 bg-brand-orange/10 text-brand-orange rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                📅
+              </div>
+              <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold brand-heading uppercase mb-2">
+                No Sessions Found
+              </h3>
+              <p className="text-slate-500 text-sm max-w-md mx-auto mb-6 font-light">
+                {selectedDay !== 'all' 
+                  ? `There are currently no upcoming sessions scheduled for ${selectedDay}s${filter !== 'all' ? ` in the ${filter} category` : ''}.`
+                  : `No sessions match your selected category or search filters.`}
+              </p>
+              <button
+                onClick={() => {
+                  setFilter('all');
+                  setSelectedDay('all');
+                  setSearchQuery('');
+                }}
+                style={{ backgroundColor: COLORS.orange }}
+                className="text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-md hover:brightness-110 active:scale-95 transition-all brand-heading"
+              >
+                Clear All Filters
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {filteredActivities.map((activity) => {
+                const effective = getEffectiveSession(activity);
+                const effectiveDate = effective.date;
+                const weekday = getDayOfWeek(activity);
                 
-                <div className="p-8 flex-grow flex flex-col md:w-3/5">
-                  <h3 style={{ color: COLORS.secondary }} className="text-2xl font-bold mb-4 brand-heading">{activity.title}</h3>
-                  <p className="text-gray-500 mb-6 text-sm font-light leading-relaxed h-12 overflow-hidden">{activity.description}</p>
-                  
-                  <div className="space-y-3 mb-8">
-                    <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
-                      <span style={{ color: COLORS.orange }}><Icons.Calendar /></span>
-                      <span>{new Date(effectiveDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                // Calculate dynamic booking count for this specific occurrence (excluding cancelled)
+                const occurrenceBookings = allBookings.filter(
+                  b => b.sessionId === activity.id && b.sessionDate === effectiveDate && b.status !== 'cancelled'
+                );
+                const currentBookedCount = occurrenceBookings.length;
+                
+                // Check if current user is booked for THIS specific occurrence (excluding cancelled)
+                const matchedBooking = user ? allBookings.find(b => 
+                  b.sessionId === activity.id && 
+                  b.sessionDate === effectiveDate && 
+                  b.userId === user.id &&
+                  b.status !== 'cancelled'
+                ) : null;
+                const isBooked = !!matchedBooking;
+
+                const isFull = currentBookedCount >= activity.capacity;
+                const catColor = getCategoryColor(activity.category);
+
+                const bookableActivity = {
+                  ...activity,
+                  date: effectiveDate,
+                  bookedCount: currentBookedCount
+                };
+
+                const dateParts = effectiveDate.split('T')[0].split('-');
+                const dateObj = dateParts.length === 3 
+                  ? new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]), 12)
+                  : new Date(effectiveDate + 'T12:00:00');
+                const formattedDate = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+                return (
+                  <div key={activity.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row hover:shadow-xl transition-all">
+                    <div className="md:w-2/5 h-56 md:h-auto relative overflow-hidden">
+                      <img 
+                        src={getActivityImage(activity)} 
+                        alt={activity.title}
+                        className="w-full h-full object-cover"
+                      />
+                      <div style={{ backgroundColor: catColor }} className="absolute top-4 left-4 text-white px-4 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest shadow-lg brand-heading">
+                        {activity.category}
+                        {activity.frequency === 'weekly' && " • Weekly"}
+                      </div>
+                      {weekday && (
+                        <div className="absolute bottom-4 left-4 bg-slate-900/85 backdrop-blur-md text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest brand-heading border border-white/10">
+                          📅 {weekday}s
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
-                      <span style={{ color: COLORS.orange }}><Icons.Clock /></span>
-                      <span>{activity.time}</span>
-                    </div>
-                  </div>
+                    
+                    <div className="p-8 flex-grow flex flex-col md:w-3/5">
+                      <h3 style={{ color: COLORS.secondary }} className="text-2xl font-bold mb-4 brand-heading">{activity.title}</h3>
+                      <p className="text-gray-500 mb-6 text-sm font-light leading-relaxed h-12 overflow-hidden">{activity.description}</p>
+                      
+                      <div className="space-y-3 mb-8">
+                        <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
+                          <span style={{ color: COLORS.orange }}><Icons.Calendar /></span>
+                          <span>
+                            {weekday ? `${weekday}, ` : ''}{formattedDate}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
+                          <span style={{ color: COLORS.orange }}><Icons.Clock /></span>
+                          <span>{activity.time}</span>
+                        </div>
+                      </div>
 
                   <div className="mt-auto pt-6 border-t border-gray-50 flex items-center justify-between">
                     <span className="text-[10px] font-bold text-gray-400 brand-heading uppercase tracking-widest">
@@ -502,6 +718,8 @@ export const Activities: React.FC<ActivitiesProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
         </div>
       )}
 
