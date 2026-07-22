@@ -45,6 +45,28 @@ export const Activities: React.FC<ActivitiesProps> = ({
   const [showFoodConflictWarning, setShowFoodConflictWarning] = useState<string | null>(null);
   const [conflictConfirmed, setConflictConfirmed] = useState(false);
 
+  const parseLocalDate = (dateStr: string): Date => {
+    if (!dateStr) return new Date();
+    const dateOnly = dateStr.split('T')[0];
+    const parts = dateOnly.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      return new Date(year, month, day, 12, 0, 0);
+    }
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return new Date();
+    return d;
+  };
+
+  const formatLocalDateStr = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getEffectiveSession = (activity: Activity) => {
     if (activity.frequency !== 'weekly') {
       return { 
@@ -56,8 +78,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    let occurrenceDate = new Date(activity.date);
-    occurrenceDate.setHours(0, 0, 0, 0);
+    let occurrenceDate = parseLocalDate(activity.date);
 
     // If the initial date is in the past, move it forward week by week until it's today or in the future
     while (occurrenceDate < today) {
@@ -65,7 +86,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
     }
 
     return {
-      date: occurrenceDate.toISOString().split('T')[0],
+      date: formatLocalDateStr(occurrenceDate),
       isBookable: true
     };
   };
@@ -74,16 +95,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
     const effective = getEffectiveSession(activity);
     const dateStr = effective.date || activity.date;
     if (!dateStr) return '';
-    const dateParts = dateStr.split('T')[0].split('-');
-    if (dateParts.length === 3) {
-      const year = parseInt(dateParts[0], 10);
-      const month = parseInt(dateParts[1], 10) - 1;
-      const day = parseInt(dateParts[2], 10);
-      const d = new Date(year, month, day, 12, 0, 0);
-      return d.toLocaleDateString('en-GB', { weekday: 'long' });
-    }
-    const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
-    if (isNaN(d.getTime())) return '';
+    const d = parseLocalDate(dateStr);
     return d.toLocaleDateString('en-GB', { weekday: 'long' });
   };
 
@@ -367,7 +379,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {sortedMyBookings.map((b) => {
-                      const sessionDateObj = new Date(b.sessionDate);
+                      const sessionDateObj = parseLocalDate(b.sessionDate);
                       const today = new Date();
                       today.setHours(0,0,0,0);
                       const isUpcoming = sessionDateObj >= today;
@@ -399,7 +411,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                             <p className="text-[9px] text-slate-400 font-extrabold uppercase mt-1 tracking-wider">ID: {b.id?.slice(-6) || b.sessionId?.slice(-6)}</p>
                           </td>
                           <td className="px-8 py-6 text-xs font-semibold text-slate-700">
-                            <p>{new Date(b.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                            <p>{parseLocalDate(b.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
                             <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">{b.sessionTime}</p>
                           </td>
                           <td className="px-8 py-6 text-xs font-semibold text-slate-600">
@@ -619,11 +631,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   bookedCount: currentBookedCount
                 };
 
-                const dateParts = effectiveDate.split('T')[0].split('-');
-                const dateObj = dateParts.length === 3 
-                  ? new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]), 12)
-                  : new Date(effectiveDate + 'T12:00:00');
-                const formattedDate = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                const formattedDate = parseLocalDate(effectiveDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
                 return (
                   <div key={activity.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row hover:shadow-xl transition-all">
@@ -761,7 +769,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Date</p>
-                      <p className="text-brand-dark-blue font-black brand-heading">{new Date(selectedActivity.date).toLocaleDateString('en-GB', { dateStyle: 'long' })}</p>
+                      <p className="text-brand-dark-blue font-black brand-heading">{parseLocalDate(selectedActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4">

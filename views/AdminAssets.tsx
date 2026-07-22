@@ -31,6 +31,28 @@ interface AdminAssetsProps {
   caseStudies?: CaseStudy[];
 }
 
+const parseLocalDate = (dateStr: string): Date => {
+  if (!dateStr) return new Date();
+  const dateOnly = dateStr.split('T')[0];
+  const parts = dateOnly.split('-');
+  if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day, 12, 0, 0);
+  }
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return new Date();
+  return d;
+};
+
+const formatLocalDateStr = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const AdminAssets: React.FC<AdminAssetsProps> = ({ 
   user,
   assets, 
@@ -2763,15 +2785,14 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                           Next: {(() => {
                             const today = new Date();
                             today.setHours(0,0,0,0);
-                            let occ = new Date(act.date);
-                            occ.setHours(0,0,0,0);
+                            let occ = parseLocalDate(act.date);
                             while (occ < today) occ.setDate(occ.getDate() + 7);
-                            return occ.toLocaleDateString();
+                            return occ.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
                           })()} @ {act.time}
                         </span>
                       ) : (
                         <span className="text-[10px] font-bold text-slate-400 brand-heading uppercase">
-                          {new Date(act.date).toLocaleDateString()} @ {act.time}
+                          {parseLocalDate(act.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} @ {act.time}
                         </span>
                       )}
                     </div>
@@ -2784,10 +2805,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             
                             const today = new Date();
                             today.setHours(0,0,0,0);
-                            let occ = new Date(act.date);
-                            occ.setHours(0,0,0,0);
+                            let occ = parseLocalDate(act.date);
                             while (occ < today) occ.setDate(occ.getDate() + 7);
-                            const effectiveDate = occ.toISOString().split('T')[0];
+                            const effectiveDate = formatLocalDateStr(occ);
                             
                             return (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === effectiveDate).length;
                           })()} / {act.capacity} Booked
