@@ -815,8 +815,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     return false;
   });
 
+  const isFriendUser = (u: User) => {
+    return u.role === 'friend' || u.profile?.registrationType === 'friend' || u.profile?.isFriendSignup === true;
+  };
+
+  const isMemberUser = (u: User) => {
+    return (u.role === 'member' || !u.role) && !isFriendUser(u) && u.role !== 'team' && u.role !== 'admin';
+  };
+
   const subTabFilteredUsers = filteredUsers.filter(u => {
     if (activeUserSubTab === 'all') return true;
+    if (activeUserSubTab === 'friend') return isFriendUser(u);
+    if (activeUserSubTab === 'member') return isMemberUser(u);
     return u.role === activeUserSubTab;
   });
 
@@ -984,7 +994,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             ].map(tab => {
               const count = tab.id === 'all' 
                 ? users.length 
-                : users.filter(u => u.role === tab.id).length;
+                : tab.id === 'friend'
+                  ? users.filter(u => isFriendUser(u)).length
+                  : tab.id === 'member'
+                    ? users.filter(u => isMemberUser(u)).length
+                    : users.filter(u => u.role === tab.id).length;
               const isActive = activeUserSubTab === tab.id;
               return (
                 <button
@@ -2989,13 +3003,37 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 </div>
               </div>
 
-              {!selectedUserDetail.profile && (
+              {isFriendUser(selectedUserDetail) ? (
+                <div className="bg-slate-50 p-8 rounded-[2rem] space-y-6">
+                  <h3 style={{ color: COLORS.orange }} className="text-xs font-black brand-heading uppercase tracking-widest">Friend Profile Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Name</p>
+                      <p className="font-bold text-brand-dark-blue">{selectedUserDetail.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Email Address</p>
+                      <p className="font-bold text-brand-dark-blue">{selectedUserDetail.email}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Mobile Number</p>
+                      <p className="font-bold text-brand-dark-blue">{(selectedUserDetail.profile as any)?.mobileNumber || selectedUserDetail.profile?.parentMobile || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Business / Network Name</p>
+                      <p className="font-bold text-brand-dark-blue">{(selectedUserDetail.profile as any)?.businessName || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Account Role</p>
+                      <p className="font-bold text-brand-orange uppercase">Friend Of free@last</p>
+                    </div>
+                  </div>
+                </div>
+              ) : !selectedUserDetail.profile ? (
                 <div className="bg-slate-50 p-12 rounded-[2rem] text-center">
                   <p className="text-slate-400 font-bold brand-heading uppercase text-sm tracking-widest">No registration profile found yet</p>
                 </div>
-              )}
-
-              {selectedUserDetail.profile && (
+              ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                   <div className="space-y-12">
                     {/* Basic Info */}

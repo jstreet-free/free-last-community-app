@@ -69,13 +69,23 @@ const App: React.FC = () => {
               }
             }
 
-            // Ensure team members with profiles or approved status are marked as complete
+            // Ensure team members or friends are marked as complete and approved
             if (userData.role === 'team' && (userData.name || userData.status === 'approved') && !userData.profileComplete) {
               userData.profileComplete = true;
               try {
                 await updateDoc(userRef, { profileComplete: true });
               } catch (err) {
                 console.error("Team complete update failed to write to Firestore:", err);
+              }
+            }
+
+            if (userData.role === 'friend' && (!userData.profileComplete || userData.status !== 'approved')) {
+              userData.profileComplete = true;
+              userData.status = 'approved';
+              try {
+                await updateDoc(userRef, { profileComplete: true, status: 'approved' });
+              } catch (err) {
+                console.error("Friend complete update failed to write to Firestore:", err);
               }
             }
             
@@ -654,23 +664,44 @@ const App: React.FC = () => {
            } else if (role === 'team' && userData.role !== 'team' && userData.role !== 'admin') {
              updatedRole = 'team';
              updatedStatus = 'pending';
+           } else if (role === 'friend' && userData.role !== 'friend' && userData.role !== 'admin') {
+             updatedRole = 'friend';
+             updatedStatus = 'approved';
            }
         }
            
-        if (updatedRole !== userData.role || updatedStatus !== userData.status || (updatedRole === 'admin' && !userData.profileComplete) || (updatedStatus === 'approved' && !userData.profileComplete)) {
+        const isFriendRole = updatedRole === 'friend';
+        if (updatedRole !== userData.role || updatedStatus !== userData.status || (updatedRole === 'admin' && !userData.profileComplete) || (updatedStatus === 'approved' && !userData.profileComplete) || (isFriendRole && !userData.profileComplete)) {
           const updates: any = { role: updatedRole, status: updatedStatus };
-          if (updatedRole === 'admin' || updatedStatus === 'approved') updates.profileComplete = true;
+          if (updatedRole === 'admin' || updatedStatus === 'approved' || isFriendRole) updates.profileComplete = true;
+          if (isFriendRole && (!userData.profile || userData.profile.registrationType !== 'friend')) {
+            updates.profile = {
+              registrationType: 'friend' as any,
+              parentName: extraFields?.name || userData.name || '',
+              parentEmail: email || userData.email || '',
+              parentMobile: extraFields?.mobile || '',
+              businessName: extraFields?.businessName || '',
+              isFriendSignup: true,
+              dataConsent: true
+            };
+          }
           await updateDoc(userRef, updates);
         }
 
-        const finalUser = { ...userData, id: uid, role: updatedRole, status: updatedStatus, profileComplete: (updatedRole === 'admin' || updatedStatus === 'approved') ? true : userData.profileComplete };
+        const finalUser = { 
+          ...userData, 
+          id: uid, 
+          role: updatedRole, 
+          status: updatedStatus, 
+          profileComplete: (updatedRole === 'admin' || updatedStatus === 'approved' || isFriendRole) ? true : userData.profileComplete 
+        };
         setUser(finalUser);
         localStorage.setItem('freeatlast_v2_user', JSON.stringify(finalUser));
         
         // Navigation based on final role
         if (updatedRole === 'admin') setActiveTab('assets');
         else if (updatedRole === 'team') setActiveTab(updatedStatus === 'approved' ? 'team' : 'registration');
-        else if (updatedRole === 'friend') setActiveTab('home');
+        else if (updatedRole === 'friend') setActiveTab('friends');
         else setActiveTab(userData.profileComplete ? 'home' : 'registration');
       } else {
         // New user creation
@@ -680,7 +711,7 @@ const App: React.FC = () => {
 
         const newUser: User = {
           id: uid,
-          name: isOwner ? 'James Street' : (finalRole === 'admin' ? 'Admin User' : (extraFields?.name || '')),
+          name: isOwner ? 'James Street' : (extraFields?.name || (email ? email.split('@')[0] : 'Friend')),
           email: email || `${finalRole}@freeatlast.hub`,
           role: finalRole,
           profileComplete: finalRole === 'friend' || finalRole === 'admin',
@@ -690,7 +721,7 @@ const App: React.FC = () => {
 
         if (finalRole === 'friend') {
           newUser.profile = {
-            registrationType: 'family',
+            registrationType: 'friend' as any,
             parentName: extraFields?.name || '',
             parentEmail: email || '',
             parentMobile: extraFields?.mobile || '',
@@ -698,13 +729,14 @@ const App: React.FC = () => {
             address: '',
             dataConsent: true,
             mobileNumber: extraFields?.mobile || '',
-            businessName: extraFields?.businessName || ''
+            businessName: extraFields?.businessName || '',
+            isFriendSignup: true
           } as any;
         }
         await setDoc(userRef, newUser);
         setUser(newUser);
         
-        setActiveTab(finalRole === 'admin' ? 'assets' : (finalRole === 'friend' ? 'home' : 'registration'));
+        setActiveTab(finalRole === 'admin' ? 'assets' : (finalRole === 'friend' ? 'friends' : 'registration'));
       }
     } catch (error: any) {
       console.error("Auth error details:", error);
@@ -1205,7 +1237,7 @@ const App: React.FC = () => {
       return <LoginPortal />;
     }
 
-    if (user && !user.profileComplete && user.role !== 'admin') {
+    if (user && !user.profileComplete && user.role !== 'admin' && user.role !== 'friend') {
       if (user.role === 'team') {
         return <TeamRegistration user={user} onSubmitted={(updatedUser) => {
            setUser(updatedUser);
@@ -1214,6 +1246,11 @@ const App: React.FC = () => {
         }} />;
       }
       return <MemberRegistration user={user} onComplete={handleCompleteRegistration} />;
+    }
+
+    // Friend access restriction: Friends only have access to home, photos (gallery), and responding on friends page
+    if (user?.role === 'friend' && activeTab !== 'home' && activeTab !== 'gallery' && activeTab !== 'friends') {
+      return <FriendsOf user={user} setActiveTab={setActiveTab} />;
     }
 
     switch (activeTab) {

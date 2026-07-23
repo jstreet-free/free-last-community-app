@@ -12,18 +12,25 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeTab, setActiveTab }) => {
-  const navItems = [
-    { id: 'home', label: 'Home', icon: <div className="font-bold text-lg">@</div>, mobileLabel: 'Home' },
-    { id: 'activities', label: 'Activities', icon: <Icons.Calendar />, mobileLabel: 'Activities' },
-    { id: 'gallery', label: 'Gallery', icon: <Icons.Camera />, mobileLabel: 'Gallery' },
-    { id: 'friends', label: 'Friends of', icon: <Icons.Shield />, mobileLabel: 'Friends' },
-    { id: 'videos', label: 'Videos', icon: <Icons.Play />, mobileLabel: 'Videos' },
-    { id: 'partners', label: 'Partners', icon: <Icons.Briefcase />, mobileLabel: 'Partners' },
-    ...((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin' ? [{ id: 'team', label: 'Team Logs', icon: <Icons.Clock />, mobileLabel: 'Team' }] : []),
-    ...(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
-    ...(user?.role === 'admin' ? [{ id: 'assets', label: 'Management', icon: <Icons.Settings />, mobileLabel: 'Manage' }] : []),
-    ...(!user ? [{ id: 'login', label: 'Sign In', icon: <Icons.LogIn />, mobileLabel: 'Login' }] : []),
-  ];
+  const isFriend = user?.role === 'friend';
+  const navItems = isFriend
+    ? [
+        { id: 'home', label: 'Home', icon: <div className="font-bold text-lg">@</div>, mobileLabel: 'Home' },
+        { id: 'gallery', label: 'Photos', icon: <Icons.Camera />, mobileLabel: 'Photos' },
+        { id: 'friends', label: 'Friends of', icon: <Icons.Shield />, mobileLabel: 'Friends' },
+      ]
+    : [
+        { id: 'home', label: 'Home', icon: <div className="font-bold text-lg">@</div>, mobileLabel: 'Home' },
+        { id: 'activities', label: 'Activities', icon: <Icons.Calendar />, mobileLabel: 'Activities' },
+        { id: 'gallery', label: 'Gallery', icon: <Icons.Camera />, mobileLabel: 'Gallery' },
+        { id: 'friends', label: 'Friends of', icon: <Icons.Shield />, mobileLabel: 'Friends' },
+        { id: 'videos', label: 'Videos', icon: <Icons.Play />, mobileLabel: 'Videos' },
+        { id: 'partners', label: 'Partners', icon: <Icons.Briefcase />, mobileLabel: 'Partners' },
+        ...((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin' ? [{ id: 'team', label: 'Team Logs', icon: <Icons.Clock />, mobileLabel: 'Team' }] : []),
+        ...(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin' ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
+        ...(user?.role === 'admin' ? [{ id: 'assets', label: 'Management', icon: <Icons.Settings />, mobileLabel: 'Manage' }] : []),
+        ...(!user ? [{ id: 'login', label: 'Sign In', icon: <Icons.LogIn />, mobileLabel: 'Login' }] : []),
+      ];
 
   return (
     <div className="min-h-screen flex flex-col">

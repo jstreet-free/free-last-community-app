@@ -143,14 +143,17 @@ export const AdminNeedsManager: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      // 1. Fetch user emails in 'friend' role
-      const q = query(collection(db, 'users'), where('role', '==', 'friend'));
-      const querySnap = await getDocs(q);
+      // 1. Fetch user emails for all friend accounts
+      const querySnap = await getDocs(collection(db, 'users'));
       const friendsEmails: string[] = [];
 
       querySnap.forEach(docSnap => {
         const u = docSnap.data();
-        if (u.email) friendsEmails.push(u.email);
+        if (u.email && (u.role === 'friend' || u.profile?.registrationType === 'friend' || u.profile?.isFriendSignup)) {
+          if (!friendsEmails.includes(u.email)) {
+            friendsEmails.push(u.email);
+          }
+        }
       });
 
       if (friendsEmails.length === 0) {

@@ -28,7 +28,7 @@ export interface ChildProfile {
 }
 
 export interface MemberProfile {
-  registrationType: 'family' | 'teenager';
+  registrationType: 'family' | 'teenager' | 'friend';
   parentName: string;
   familyName?: string; // for family
   address: string;
