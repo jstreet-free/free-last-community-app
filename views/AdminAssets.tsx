@@ -676,24 +676,44 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
   const handleAdminUpdateUser = async (userId: string, newStatus: UserStatus, newRole: string, newVolunteerNum: string, profileComplete: boolean) => {
     try {
-      // Automatically bypass / mark complete if they are assigned as an approved team member
+      // Automatically bypass / mark complete if assigned as friend or approved team member
       let finalProfileComplete = profileComplete;
-      if (newRole === 'team' && newStatus === 'approved') {
+      let finalStatus = newStatus;
+      if (newRole === 'friend') {
+        finalProfileComplete = true;
+        if (newStatus === 'pending') {
+          finalStatus = 'approved';
+        }
+      } else if (newRole === 'team' && newStatus === 'approved') {
         finalProfileComplete = true;
       }
       
       const updatedFields: any = {
-        status: newStatus,
+        status: finalStatus,
         role: newRole,
         volunteerNumber: newVolunteerNum.trim(),
         profileComplete: finalProfileComplete
       };
+
+      if (newRole === 'friend' && (!selectedUserDetail?.profile || selectedUserDetail?.profile.registrationType !== 'friend')) {
+        updatedFields.profile = {
+          registrationType: 'friend' as any,
+          parentName: selectedUserDetail?.name || '',
+          parentEmail: selectedUserDetail?.email || '',
+          parentMobile: selectedUserDetail?.profile?.parentMobile || '',
+          businessName: (selectedUserDetail?.profile as any)?.businessName || '',
+          isFriendSignup: true,
+          dataConsent: true
+        };
+      }
+
       await updateDoc(doc(db, 'users', userId), updatedFields);
       
       if (selectedUserDetail && selectedUserDetail.id === userId) {
         setSelectedUserDetail({
           ...selectedUserDetail,
-          status: newStatus,
+          ...updatedFields,
+          status: finalStatus,
           role: newRole,
           volunteerNumber: newVolunteerNum.trim(),
           profileComplete: finalProfileComplete
@@ -2932,6 +2952,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs text-brand-dark-blue outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
                     >
                       <option value="member">member</option>
+                      <option value="friend">friend</option>
                       <option value="team">team</option>
                       <option value="admin">admin</option>
                     </select>
