@@ -185,15 +185,20 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
 
     const hasNechells = address.toLowerCase().includes('nechells') || postcode.toLowerCase().includes('nechells');
     
-    // Check if string contains word "B7" (with boundaries, e.g. not B70, B72 etc.) or B7 followed by digit
+    // Check if string contains "Nechells" or B7 postcode
     const hasB7Postcode = (str: string) => {
-      return /\bB7\b/i.test(str) || /\bB7\s*\d/i.test(str);
+      const clean = str.trim().toUpperCase();
+      if (/\bB7\b/i.test(clean)) return true;
+      if (/\bB7\s+\d/i.test(clean)) return true;
+      if (/\bB7[45]/i.test(clean) && !/\bB7[0-36-9]/i.test(clean)) return true;
+      return false;
     };
     
     const isPostcodeB7 = hasB7Postcode(postcode) || hasB7Postcode(address);
     const isAddressNechells = hasNechells;
 
-    if (!isPostcodeB7 || !isAddressNechells) {
+    // Allow registration if user has B7 postcode OR lives in Nechells
+    if (!isPostcodeB7 && !isAddressNechells) {
       const personName = registrationType === 'teenager' ? teenagerInfo.name : parentInfo.parentName;
       
       const raiseWarning = async () => {

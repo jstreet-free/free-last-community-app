@@ -3,15 +3,17 @@ import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
 import { Activity, User } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
+export interface BookingDetail {
+  participantName: string;
+  bookerMobile: string;
+  activity: Activity;
+  foodChoice?: string;
+  foodConflictConfirmed?: boolean;
+}
+
 interface ActivitiesProps {
   user: User | null;
-  onBook: (bookingDetail: {
-    participantName: string;
-    bookerMobile: string;
-    activity: Activity;
-    foodChoice?: string;
-    foodConflictConfirmed?: boolean;
-  }) => void;
+  onBook: (bookingDetail: BookingDetail | BookingDetail[]) => void;
   onCancel?: (bookingId: string) => void;
   bookings: string[];
   assets: any;
@@ -19,6 +21,23 @@ interface ActivitiesProps {
   activities: Activity[];
   allBookings: any[];
   setActiveTab: (tab: string) => void;
+}
+
+export interface AccountMember {
+  id: string;
+  name: string;
+  roleTag: string;
+  dietaryAllergies: string;
+}
+
+export interface BookingParticipant {
+  id: string;
+  name: string;
+  isAccountMember: boolean;
+  accountMemberId?: string;
+  foodChoice: string;
+  foodConflictWarning: string | null;
+  conflictConfirmed: boolean;
 }
 
 export const Activities: React.FC<ActivitiesProps> = ({ 
@@ -37,13 +56,9 @@ export const Activities: React.FC<ActivitiesProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [viewMode, setViewMode] = useState<'explore' | 'history'>('explore');
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
-  const [bookingForm, setBookingForm] = useState({
-    participantName: '',
-    bookerMobile: '',
-    foodChoice: ''
-  });
-  const [showFoodConflictWarning, setShowFoodConflictWarning] = useState<string | null>(null);
-  const [conflictConfirmed, setConflictConfirmed] = useState(false);
+  const [bookerMobile, setBookerMobile] = useState<string>('');
+  const [participants, setParticipants] = useState<BookingParticipant[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
   const parseLocalDate = (dateStr: string): Date => {
     if (!dateStr) return new Date();
@@ -184,6 +199,48 @@ export const Activities: React.FC<ActivitiesProps> = ({
     return null;
   };
 
+  const getAccountMembers = (currentUser: User | null): AccountMember[] => {
+    if (!currentUser) return [];
+    const list: AccountMember[] = [];
+
+    const mainName = currentUser.profile?.parentName || currentUser.name;
+    if (mainName) {
+      list.push({
+        id: 'parent-main',
+        name: mainName,
+        roleTag: 'Main Account Holder',
+        dietaryAllergies: getDietaryAllergies(mainName)
+      });
+    }
+
+    if (currentUser.profile?.teenagerDetails?.name) {
+      const teenName = currentUser.profile.teenagerDetails.name;
+      if (!list.some(m => m.name.toLowerCase().trim() === teenName.toLowerCase().trim())) {
+        list.push({
+          id: 'teenager-main',
+          name: teenName,
+          roleTag: 'Teenager',
+          dietaryAllergies: currentUser.profile.teenagerDetails.dietaryAllergies || ''
+        });
+      }
+    }
+
+    if (currentUser.profile?.children && Array.isArray(currentUser.profile.children)) {
+      currentUser.profile.children.forEach((c: any, idx: number) => {
+        if (c.name && !list.some(m => m.name.toLowerCase().trim() === c.name.toLowerCase().trim())) {
+          list.push({
+            id: `child-${idx}`,
+            name: c.name,
+            roleTag: `Child${c.age ? ` (${c.age} yrs)` : ''}`,
+            dietaryAllergies: c.dietaryAllergies || ''
+          });
+        }
+      });
+    }
+
+    return list;
+  };
+
   const handleOpenBooking = (activity: Activity) => {
     let defaultFood = '';
     if (activity.includesFood && activity.foodOptions) {
@@ -194,43 +251,184 @@ export const Activities: React.FC<ActivitiesProps> = ({
     }
 
     setSelectedActivity(activity);
-    setBookingForm({
-      participantName: user?.name || '',
-      bookerMobile: user?.profile?.parentMobile || user?.profile?.parentMobile || '',
-      foodChoice: defaultFood
-    });
-    setShowFoodConflictWarning(null);
-    setConflictConfirmed(false);
+    const mobile = user?.profile?.parentMobile || (user?.profile as any)?.mobileNumber || '';
+    setBookerMobile(mobile);
+
+    const accountMembers = getAccountMembers(user);
+    if (accountMembers.length > 0) {
+      const effective = getEffectiveSession(activity);
+      const alreadyBookedNames = allBookings
+        .filter(b => b.sessionId === activity.id && b.sessionDate === effective.date && b.userId === user?.id && b.status !== 'cancelled')
+        .map(b => b.participantName.toLowerCase().trim());
+
+      const initialMember = accountMembers.find(m => !alreadyBookedNames.includes(m.name.toLowerCase().trim())) || accountMembers[0];
+
+      setSelectedMemberIds([initialMember.id]);
+      const allergies = getDietaryAllergies(initialMember.name);
+      const warning = activity.includesFood && defaultFood ? checkFoodConflict(defaultFood, allergies) : null;
+
+      setParticipants([
+        {
+          id: initialMember.id,
+          name: initialMember.name,
+          isAccountMember: true,
+          accountMemberId: initialMember.id,
+          foodChoice: defaultFood,
+          foodConflictWarning: warning,
+          conflictConfirmed: false,
+        }
+      ]);
+    } else {
+      setSelectedMemberIds([]);
+      const defaultName = user?.name || '';
+      const allergies = getDietaryAllergies(defaultName);
+      const warning = activity.includesFood && defaultFood ? checkFoodConflict(defaultFood, allergies) : null;
+
+      setParticipants([
+        {
+          id: 'custom-' + Date.now(),
+          name: defaultName,
+          isAccountMember: false,
+          foodChoice: defaultFood,
+          foodConflictWarning: warning,
+          conflictConfirmed: false,
+        }
+      ]);
+    }
+  };
+
+  const toggleAccountMember = (member: AccountMember, defaultFood: string) => {
+    if (!selectedActivity) return;
+    const isSelected = selectedMemberIds.includes(member.id);
+
+    if (isSelected) {
+      setSelectedMemberIds(prev => prev.filter(id => id !== member.id));
+      setParticipants(prev => prev.filter(p => p.accountMemberId !== member.id));
+    } else {
+      setSelectedMemberIds(prev => [...prev, member.id]);
+      const allergies = getDietaryAllergies(member.name);
+      const warning = selectedActivity.includesFood && defaultFood ? checkFoodConflict(defaultFood, allergies) : null;
+
+      setParticipants(prev => [
+        ...prev,
+        {
+          id: member.id,
+          name: member.name,
+          isAccountMember: true,
+          accountMemberId: member.id,
+          foodChoice: defaultFood,
+          foodConflictWarning: warning,
+          conflictConfirmed: false,
+        }
+      ]);
+    }
+  };
+
+  const addCustomParticipant = (defaultFood: string) => {
+    if (!selectedActivity) return;
+    const newId = 'custom-' + Date.now() + Math.random().toString(36).substring(2, 5);
+    setParticipants(prev => [
+      ...prev,
+      {
+        id: newId,
+        name: '',
+        isAccountMember: false,
+        foodChoice: defaultFood,
+        foodConflictWarning: null,
+        conflictConfirmed: false,
+      }
+    ]);
+  };
+
+  const removeParticipant = (id: string, accountMemberId?: string) => {
+    setParticipants(prev => prev.filter(p => p.id !== id));
+    if (accountMemberId) {
+      setSelectedMemberIds(prev => prev.filter(mId => mId !== accountMemberId));
+    }
+  };
+
+  const updateParticipantName = (id: string, name: string) => {
+    setParticipants(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      const allergies = getDietaryAllergies(name);
+      const warning = selectedActivity?.includesFood && p.foodChoice ? checkFoodConflict(p.foodChoice, allergies) : null;
+      return {
+        ...p,
+        name,
+        foodConflictWarning: warning,
+        conflictConfirmed: false
+      };
+    }));
+  };
+
+  const updateParticipantFood = (id: string, foodChoice: string) => {
+    setParticipants(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      const allergies = getDietaryAllergies(p.name);
+      const warning = selectedActivity?.includesFood ? checkFoodConflict(foodChoice, allergies) : null;
+      return {
+        ...p,
+        foodChoice,
+        foodConflictWarning: warning,
+        conflictConfirmed: false
+      };
+    }));
+  };
+
+  const updateParticipantConflictConfirmed = (id: string, conflictConfirmed: boolean) => {
+    setParticipants(prev => prev.map(p => p.id === id ? { ...p, conflictConfirmed } : p));
   };
 
   const handleConfirmBooking = () => {
     if (!selectedActivity) return;
-    if (!bookingForm.participantName || !bookingForm.bookerMobile) {
-      alert("Please fill in all details to confirm your booking.");
+
+    if (participants.length === 0) {
+      alert("Please select or enter at least one participant from your family.");
       return;
     }
 
-    if (selectedActivity.includesFood && bookingForm.foodChoice) {
-      const allergies = getDietaryAllergies(bookingForm.participantName);
-      const conflictMsg = checkFoodConflict(bookingForm.foodChoice, allergies);
-      
-      if (conflictMsg && !conflictConfirmed) {
-        setShowFoodConflictWarning(conflictMsg);
-        return;
-      }
+    if (!bookerMobile.trim()) {
+      alert("Please enter a contact mobile number.");
+      return;
     }
 
-    onBook({
-      participantName: bookingForm.participantName,
-      bookerMobile: bookingForm.bookerMobile,
-      activity: selectedActivity,
-      foodChoice: selectedActivity.includesFood ? bookingForm.foodChoice : undefined,
-      foodConflictConfirmed: conflictConfirmed,
-    });
-    
+    const emptyParticipant = participants.find(p => !p.name.trim());
+    if (emptyParticipant) {
+      alert("Please ensure all participant names are filled in.");
+      return;
+    }
+
+    const effective = getEffectiveSession(selectedActivity);
+    const occurrenceBookings = allBookings.filter(
+      b => b.sessionId === selectedActivity.id && b.sessionDate === effective.date && b.status !== 'cancelled'
+    );
+    const currentBookedCount = occurrenceBookings.length;
+    const remainingSpaces = selectedActivity.capacity - currentBookedCount;
+
+    if (participants.length > remainingSpaces) {
+      alert(`Sorry, only ${remainingSpaces} space(s) remain for this session, but you have ${participants.length} participant(s) selected. Please adjust your selection.`);
+      return;
+    }
+
+    const unconfirmed = participants.find(p => p.foodConflictWarning && !p.conflictConfirmed);
+    if (unconfirmed) {
+      alert(`Please confirm the dietary/allergy warning for ${unconfirmed.name} before completing the booking.`);
+      return;
+    }
+
+    const detailsList: BookingDetail[] = participants.map(p => ({
+      participantName: p.name.trim(),
+      bookerMobile: bookerMobile.trim(),
+      activity: { ...selectedActivity, date: effective.date },
+      foodChoice: selectedActivity.includesFood ? p.foodChoice : undefined,
+      foodConflictConfirmed: p.conflictConfirmed,
+    }));
+
+    onBook(detailsList);
+
     setSelectedActivity(null);
-    setShowFoodConflictWarning(null);
-    setConflictConfirmed(false);
+    setParticipants([]);
+    setSelectedMemberIds([]);
   };
 
   const upcomingActivities = activities.filter(a => a.status === 'upcoming');
@@ -614,13 +812,13 @@ export const Activities: React.FC<ActivitiesProps> = ({
                 const currentBookedCount = occurrenceBookings.length;
                 
                 // Check if current user is booked for THIS specific occurrence (excluding cancelled)
-                const matchedBooking = user ? allBookings.find(b => 
+                const occurrenceUserBookings = user ? allBookings.filter(b => 
                   b.sessionId === activity.id && 
                   b.sessionDate === effectiveDate && 
                   b.userId === user.id &&
                   b.status !== 'cancelled'
-                ) : null;
-                const isBooked = !!matchedBooking;
+                ) : [];
+                const isBooked = occurrenceUserBookings.length > 0;
 
                 const isFull = currentBookedCount >= activity.capacity;
                 const catColor = getCategoryColor(activity.category);
@@ -690,22 +888,44 @@ export const Activities: React.FC<ActivitiesProps> = ({
                     ) : (
                       <div className="flex items-center gap-2">
                         {isBooked ? (
-                          <div className="flex items-center gap-2">
-                            <span className="bg-green-600 text-white px-5 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-widest brand-heading">
-                              ✓ Booked
-                            </span>
-                            {onCancel && matchedBooking && (
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Are you sure you want to cancel your booking for ${activity.title}?`)) {
-                                    onCancel(matchedBooking.id);
-                                  }
-                                }}
-                                className="px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 border border-red-100 hover:border-red-200 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all brand-heading"
-                              >
-                                Cancel
-                              </button>
-                            )}
+                          <div className="flex flex-col items-end gap-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="bg-green-600 text-white px-3.5 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest brand-heading">
+                                ✓ Booked ({occurrenceUserBookings.length})
+                              </span>
+                              {!isFull && (
+                                <button
+                                  onClick={() => handleOpenBooking(bookableActivity)}
+                                  style={{ backgroundColor: COLORS.orange }}
+                                  className="px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-wider text-white hover:brightness-110 transition-all brand-heading shadow-sm"
+                                  title="Add another family member"
+                                >
+                                  + Add Person
+                                </button>
+                              )}
+                              {onCancel && (
+                                <button
+                                  onClick={() => {
+                                    if (occurrenceUserBookings.length === 1) {
+                                      if (confirm(`Are you sure you want to cancel your booking for ${activity.title}?`)) {
+                                        onCancel(occurrenceUserBookings[0].id);
+                                      }
+                                    } else {
+                                      const names = occurrenceUserBookings.map(b => b.participantName).join('\n- ');
+                                      if (confirm(`Cancel all ${occurrenceUserBookings.length} family bookings for this session?\n\nParticipants:\n- ${names}`)) {
+                                        occurrenceUserBookings.forEach(b => onCancel(b.id));
+                                      }
+                                    }
+                                  }}
+                                  className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 border border-red-100 hover:border-red-200 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all brand-heading"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-[9px] text-slate-400 font-bold truncate max-w-[200px]" title={occurrenceUserBookings.map(b => b.participantName).join(', ')}>
+                              Attending: {occurrenceUserBookings.map(b => b.participantName).join(', ')}
+                            </p>
                           </div>
                         ) : (
                           <button
@@ -732,163 +952,266 @@ export const Activities: React.FC<ActivitiesProps> = ({
       )}
 
       <AnimatePresence>
-        {selectedActivity && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedActivity(null)}
-              className="absolute inset-0 bg-brand-dark-blue/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-xl bg-white rounded-[3.5rem] shadow-2xl overflow-hidden"
-            >
-              <div style={{ backgroundColor: COLORS.secondary }} className="p-12 text-white relative">
-                <button 
-                  onClick={() => setSelectedActivity(null)}
-                  className="absolute top-10 right-10 text-white/50 hover:text-white transition-colors"
-                >
-                  <Icons.Plus className="rotate-45 h-10 w-10" />
-                </button>
-                <div style={{ color: COLORS.yellow }} className="mb-6"><Icons.Calendar /></div>
-                <h2 className="text-3xl font-black brand-heading uppercase tracking-tight leading-none mb-4">Confirm Registration</h2>
-                <div className="flex items-center gap-4 text-white/70 font-bold text-xs uppercase tracking-[0.2em] brand-heading">
-                  <span className="bg-white/10 px-3 py-1 rounded-lg">{selectedActivity.title}</span>
-                </div>
-              </div>
+        {selectedActivity && (() => {
+          const accountMembers = getAccountMembers(user);
+          const defaultFood = selectedActivity.includesFood && selectedActivity.foodOptions 
+            ? selectedActivity.foodOptions.split(',').map(s => s.trim())[0] || '' 
+            : '';
+          const effective = getEffectiveSession(selectedActivity);
+          const occurrenceBookings = allBookings.filter(
+            b => b.sessionId === selectedActivity.id && b.sessionDate === effective.date && b.status !== 'cancelled'
+          );
+          const remainingSpaces = selectedActivity.capacity - occurrenceBookings.length;
 
-              <div className="p-12 space-y-8">
-                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
-                  <div className="flex items-center gap-4">
-                    <div style={{ backgroundColor: COLORS.orange }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white">
-                      <Icons.Calendar className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Date</p>
-                      <p className="text-brand-dark-blue font-black brand-heading">{parseLocalDate(selectedActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div style={{ backgroundColor: COLORS.lightBlue }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white">
-                      <Icons.Clock className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Time</p>
-                      <p className="text-brand-dark-blue font-black brand-heading">{selectedActivity.time}</p>
-                    </div>
+          return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setSelectedActivity(null)}
+                className="fixed inset-0 bg-brand-dark-blue/80 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative w-full max-w-2xl bg-white rounded-[3rem] shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col z-10"
+              >
+                <div style={{ backgroundColor: COLORS.secondary }} className="p-8 md:p-10 text-white relative shrink-0">
+                  <button 
+                    onClick={() => setSelectedActivity(null)}
+                    className="absolute top-8 right-8 text-white/50 hover:text-white transition-colors"
+                  >
+                    <Icons.Plus className="rotate-45 h-8 w-8" />
+                  </button>
+                  <div style={{ color: COLORS.yellow }} className="mb-4"><Icons.Calendar /></div>
+                  <h2 className="text-2xl md:text-3xl font-black brand-heading uppercase tracking-tight leading-none mb-3">
+                    Confirm Session Registration
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 text-white/80 font-bold text-xs uppercase tracking-[0.15em] brand-heading">
+                    <span className="bg-white/10 px-3 py-1 rounded-lg">{selectedActivity.title}</span>
+                    <span className="bg-brand-orange/40 text-orange-200 px-3 py-1 rounded-lg">
+                      {remainingSpaces} {remainingSpaces === 1 ? 'Space' : 'Spaces'} Left
+                    </span>
                   </div>
                 </div>
 
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading px-2">Participant Name (who is attending?)</label>
-                    <input 
-                      type="text"
-                      placeholder="Enter full name"
-                      value={bookingForm.participantName}
-                      onChange={(e) => setBookingForm({...bookingForm, participantName: e.target.value})}
-                      className="w-full px-8 py-5 bg-white border-2 border-slate-100 rounded-2xl focus:border-brand-orange outline-none transition-all font-bold text-slate-600"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading px-2">Booker Contact No.</label>
-                    <input 
-                      type="tel"
-                      placeholder="e.g. 07123 456 789"
-                      value={bookingForm.bookerMobile}
-                      onChange={(e) => setBookingForm({...bookingForm, bookerMobile: e.target.value})}
-                      className="w-full px-8 py-5 bg-white border-2 border-slate-100 rounded-2xl focus:border-brand-orange outline-none transition-all font-bold text-slate-600"
-                    />
-                  </div>
-
-                  {selectedActivity.includesFood && (
-                    <div className="space-y-4 pt-4 border-t border-slate-100">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading px-2 text-brand-orange">
-                          Preferred Food Option (Included in Activity)
-                        </label>
-                        {selectedActivity.foodOptions ? (
-                          <div className="grid grid-cols-2 gap-3">
-                            {selectedActivity.foodOptions.split(',').map(s => s.trim()).map((option) => (
-                              <button
-                                key={option}
-                                type="button"
-                                onClick={() => {
-                                  setBookingForm({...bookingForm, foodChoice: option});
-                                  setShowFoodConflictWarning(null);
-                                  setConflictConfirmed(false);
-                                }}
-                                className={`p-4 rounded-xl border-2 text-sm font-bold text-left transition-all ${
-                                  bookingForm.foodChoice === option
-                                    ? 'border-brand-orange bg-orange-50/50 text-brand-orange'
-                                    : 'border-slate-100 bg-slate-50 text-slate-600 hover:border-slate-200'
-                                }`}
-                              >
-                                {option}
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <input
-                            type="text"
-                            placeholder="e.g. Vegetarian meal, halal, none"
-                            value={bookingForm.foodChoice}
-                            onChange={(e) => {
-                              setBookingForm({...bookingForm, foodChoice: e.target.value});
-                              setShowFoodConflictWarning(null);
-                              setConflictConfirmed(false);
-                            }}
-                            className="w-full px-8 py-5 bg-white border-2 border-slate-100 rounded-2xl focus:border-brand-orange outline-none transition-all font-bold text-slate-600"
-                          />
-                        )}
+                <div className="p-8 md:p-10 space-y-6 overflow-y-auto flex-grow">
+                  {/* Session Overview */}
+                  <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex items-center gap-3">
+                      <div style={{ backgroundColor: COLORS.orange }} className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0">
+                        <Icons.Calendar className="h-4 w-4" />
                       </div>
+                      <div>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date</p>
+                        <p className="text-brand-dark-blue font-black text-sm brand-heading">
+                          {parseLocalDate(selectedActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div style={{ backgroundColor: COLORS.lightBlue }} className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0">
+                        <Icons.Clock className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Time</p>
+                        <p className="text-brand-dark-blue font-black text-sm brand-heading">{selectedActivity.time}</p>
+                      </div>
+                    </div>
+                  </div>
 
-                      {showFoodConflictWarning && (
-                        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-6 text-amber-800 space-y-4 animate-fadeIn">
-                          <div className="flex items-start gap-3">
-                            <div className="shrink-0 mt-0.5 text-amber-600">
-                              <Icons.AlertTriangle className="h-6 w-6" />
-                            </div>
-                            <div className="space-y-1">
-                              <p className="font-bold text-amber-900 uppercase tracking-wide text-xs brand-heading">Dietary & Allergy Warning</p>
-                              <p className="text-sm font-light leading-relaxed">{showFoodConflictWarning}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3 pt-2 border-t border-amber-200">
-                            <input 
-                              type="checkbox" 
-                              id="confirmConflict"
-                              checked={conflictConfirmed}
-                              onChange={(e) => setConflictConfirmed(e.target.checked)}
-                              className="h-5 w-5 text-brand-orange focus:ring-brand-orange border-amber-300 rounded"
-                            />
-                            <label htmlFor="confirmConflict" className="text-xs font-bold text-amber-900 cursor-pointer select-none">
-                              I confirm this food choice is safe and I want to proceed.
+                  {/* Account Family Members Checklist */}
+                  {accountMembers.length > 0 && (
+                    <div className="space-y-3 bg-slate-50/80 p-5 rounded-2xl border border-slate-200/70">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-brand-dark-blue uppercase tracking-widest brand-heading">
+                          Select Registered Family Members
+                        </label>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Account Members</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {accountMembers.map((member) => {
+                          const isChecked = selectedMemberIds.includes(member.id);
+                          const isAlreadyBooked = allBookings.some(
+                            b => b.sessionId === selectedActivity.id &&
+                                 b.sessionDate === effective.date &&
+                                 b.userId === user?.id &&
+                                 b.status !== 'cancelled' &&
+                                 b.participantName.toLowerCase().trim() === member.name.toLowerCase().trim()
+                          );
+
+                          return (
+                            <label 
+                              key={member.id}
+                              className={`flex items-center justify-between p-3.5 rounded-xl border-2 transition-all cursor-pointer ${
+                                isChecked
+                                  ? 'border-brand-orange bg-orange-50/50 text-brand-dark-blue shadow-sm'
+                                  : 'border-slate-100 bg-white hover:border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => toggleAccountMember(member, defaultFood)}
+                                  className="h-5 w-5 text-brand-orange focus:ring-brand-orange border-slate-300 rounded cursor-pointer"
+                                />
+                                <div>
+                                  <p className="font-bold text-sm text-slate-800">{member.name}</p>
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{member.roleTag}</p>
+                                </div>
+                              </div>
+                              {isAlreadyBooked && (
+                                <span className="text-[9px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full uppercase brand-heading">
+                                  Already Registered
+                                </span>
+                              )}
                             </label>
-                          </div>
-                        </div>
-                      )}
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
-                </div>
 
-                <div className="pt-6">
-                  <button 
-                    onClick={handleConfirmBooking}
-                    style={{ backgroundColor: COLORS.orange }}
-                    className="w-full py-6 rounded-2xl text-white font-black text-lg brand-heading uppercase tracking-[0.2em] shadow-xl hover:brightness-110 transition-all active:scale-95"
-                  >
-                    Complete Booking
-                  </button>
+                  {/* Individual Space per Participant */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pt-2">
+                      <div>
+                        <h4 className="text-xs font-black text-brand-dark-blue uppercase tracking-widest brand-heading">
+                          People Being Booked ({participants.length})
+                        </h4>
+                        <p className="text-[11px] text-slate-400 font-medium">Specific space and preferences for each person</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addCustomParticipant(defaultFood)}
+                        className="px-3.5 py-2 bg-brand-orange/10 hover:bg-brand-orange/20 text-brand-orange text-xs font-bold rounded-xl uppercase tracking-wider transition-all brand-heading flex items-center gap-1"
+                      >
+                        <Icons.Plus className="h-4 w-4" /> Add Person
+                      </button>
+                    </div>
+
+                    {participants.map((p, index) => (
+                      <div key={p.id} className="p-5 bg-slate-50/90 rounded-2xl border-2 border-slate-100 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-brand-orange uppercase tracking-widest brand-heading bg-orange-100/80 px-2.5 py-1 rounded-md">
+                            Person {index + 1} {p.isAccountMember ? '• Account Family Member' : ''}
+                          </span>
+                          {participants.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeParticipant(p.id, p.accountMemberId)}
+                              className="text-slate-400 hover:text-red-500 text-xs font-bold transition-colors"
+                            >
+                              ✕ Remove
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">
+                            Participant Full Name
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Enter participant full name"
+                            value={p.name}
+                            onChange={(e) => updateParticipantName(p.id, e.target.value)}
+                            className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-brand-orange outline-none font-bold text-slate-700 text-sm"
+                          />
+                        </div>
+
+                        {selectedActivity.includesFood && (
+                          <div className="space-y-2.5 pt-2 border-t border-slate-200/60">
+                            <label className="text-[10px] font-bold text-brand-orange uppercase tracking-widest brand-heading">
+                              Food Choice for {p.name || `Person ${index + 1}`}
+                            </label>
+                            {selectedActivity.foodOptions ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                {selectedActivity.foodOptions.split(',').map(s => s.trim()).map((option) => (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    onClick={() => updateParticipantFood(p.id, option)}
+                                    className={`p-3 rounded-xl border-2 text-xs font-bold text-left transition-all ${
+                                      p.foodChoice === option
+                                        ? 'border-brand-orange bg-orange-50 text-brand-orange font-black'
+                                        : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200'
+                                    }`}
+                                  >
+                                    {option}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="Dietary requirements / food choice"
+                                value={p.foodChoice}
+                                onChange={(e) => updateParticipantFood(p.id, e.target.value)}
+                                className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-brand-orange outline-none text-xs font-bold text-slate-600"
+                              />
+                            )}
+
+                            {p.foodConflictWarning && (
+                              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 text-amber-800 space-y-3">
+                                <div className="flex items-start gap-2.5">
+                                  <Icons.AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                                  <div className="space-y-1">
+                                    <p className="font-bold text-amber-900 uppercase text-[10px] brand-heading">Dietary & Allergy Notice</p>
+                                    <p className="text-xs font-medium text-amber-800 leading-snug">{p.foodConflictWarning}</p>
+                                  </div>
+                                </div>
+                                <label className="flex items-center gap-2.5 pt-2 border-t border-amber-200 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={p.conflictConfirmed}
+                                    onChange={(e) => updateParticipantConflictConfirmed(p.id, e.target.checked)}
+                                    className="h-4 w-4 text-brand-orange focus:ring-brand-orange border-amber-300 rounded"
+                                  />
+                                  <span className="text-xs font-bold text-amber-900">
+                                    I confirm this food choice is safe for {p.name || 'this participant'}.
+                                  </span>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Booker Contact Mobile */}
+                  <div className="space-y-1.5 pt-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">
+                      Booker Contact Mobile Number
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="e.g. 07123 456 789"
+                      value={bookerMobile}
+                      onChange={(e) => setBookerMobile(e.target.value)}
+                      className="w-full px-5 py-3.5 bg-white border-2 border-slate-100 rounded-xl focus:border-brand-orange outline-none font-bold text-slate-700 text-sm"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-2">
+                    <button 
+                      onClick={handleConfirmBooking}
+                      style={{ backgroundColor: COLORS.orange }}
+                      className="w-full py-5 rounded-2xl text-white font-black text-sm md:text-base brand-heading uppercase tracking-[0.15em] shadow-xl hover:brightness-110 transition-all active:scale-95"
+                    >
+                      Complete Booking ({participants.length} {participants.length === 1 ? 'Person' : 'People'})
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );

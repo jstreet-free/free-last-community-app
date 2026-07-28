@@ -798,13 +798,19 @@ const App: React.FC = () => {
     setActiveTab('home');
   };
 
-  const handleBookActivity = async (detail: { 
+  const handleBookActivity = async (bookingDetails: { 
     participantName: string; 
     bookerMobile: string; 
     activity: Activity;
     foodChoice?: string;
     foodConflictConfirmed?: boolean;
-  }) => {
+  } | Array<{
+    participantName: string; 
+    bookerMobile: string; 
+    activity: Activity;
+    foodChoice?: string;
+    foodConflictConfirmed?: boolean;
+  }>) => {
     if (!user) return;
     
     // Explicitly check photo policy for members/team
@@ -813,117 +819,123 @@ const App: React.FC = () => {
       return;
     }
     
+    const detailsList = Array.isArray(bookingDetails) ? bookingDetails : [bookingDetails];
+    if (detailsList.length === 0) return;
+
     const path = 'bookings';
     try {
-      // Raise a warning note with admin if they confirmed against their medical/dietary info
-      if (detail.foodConflictConfirmed) {
-        try {
-          await addDoc(collection(db, 'warnings'), {
-            type: 'dietary_conflict_confirmed',
-            title: 'Dietary Conflict Confirmed',
-            message: `${detail.participantName} booked ${detail.activity.title} and chose "${detail.foodChoice || 'Unknown'}" which conflicts with their registered dietary/allergies information.`,
-            personName: detail.participantName,
-            userEmail: user.email || '',
-            details: {
-              sessionTitle: detail.activity.title,
-              sessionDate: detail.activity.date,
-              sessionTime: detail.activity.time,
-              sessionId: detail.activity.id,
-              foodChoice: detail.foodChoice || '',
-              bookerName: user.name,
-              bookerMobile: detail.bookerMobile,
-            },
-            timestamp: new Date().toISOString()
-          });
+      for (const detail of detailsList) {
+        // Raise a warning note with admin if they confirmed against their medical/dietary info
+        if (detail.foodConflictConfirmed) {
+          try {
+            await addDoc(collection(db, 'warnings'), {
+              type: 'dietary_conflict_confirmed',
+              title: 'Dietary Conflict Confirmed',
+              message: `${detail.participantName} booked ${detail.activity.title} and chose "${detail.foodChoice || 'Unknown'}" which conflicts with their registered dietary/allergies information.`,
+              personName: detail.participantName,
+              userEmail: user.email || '',
+              details: {
+                sessionTitle: detail.activity.title,
+                sessionDate: detail.activity.date,
+                sessionTime: detail.activity.time,
+                sessionId: detail.activity.id,
+                foodChoice: detail.foodChoice || '',
+                bookerName: user.name,
+                bookerMobile: detail.bookerMobile,
+              },
+              timestamp: new Date().toISOString()
+            });
 
-          // Send warning email to admin as well
-          await addDoc(collection(db, 'mail'), {
-            to: ['jstreet@freeatlast.co.uk'],
-            replyTo: user.email,
-            message: {
-              subject: `⚠️ DIETARY WARNING: Booking Conflict for ${detail.participantName}`,
-              text: `Warning: A booking was completed with a confirmed dietary conflict!\nParticipant: ${detail.participantName}\nActivity: ${detail.activity.title}\nFood Chosen: ${detail.foodChoice}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
-              html: `
-                <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #ea580c; padding: 20px; border-radius: 15px;">
-                  <h2 style="color: #ea580c; margin-top: 0;">⚠️ Dietary Booking Conflict Confirmed</h2>
-                  <p>A participant was registered with a food option that conflicts with their medical or dietary information on file, and the booker explicitly bypassed the alert.</p>
-                  <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-                  <div style="background: #fffbeb; padding: 15px; border-radius: 10px; border: 1px solid #fef3c7;">
-                    <p style="margin: 5px 0;"><strong>Participant:</strong> ${detail.participantName}</p>
-                    <p style="margin: 5px 0;"><strong>Activity:</strong> ${detail.activity.title}</p>
-                    <p style="margin: 5px 0;"><strong>Chosen Food Option:</strong> <span style="color: #ea580c; font-weight: bold;">${detail.foodChoice || 'None'}</span></p>
-                    <p style="margin: 5px 0;"><strong>Booker Name:</strong> ${user.name}</p>
-                    <p style="margin: 5px 0;"><strong>Contact Mobile:</strong> ${detail.bookerMobile}</p>
-                    <p style="margin: 5px 0;"><strong>Contact Email:</strong> ${user.email}</p>
-                    <p style="margin: 5px 0;"><strong>Date & Time:</strong> ${detail.activity.date} @ ${detail.activity.time}</p>
+            // Send warning email to admin as well
+            await addDoc(collection(db, 'mail'), {
+              to: ['jstreet@freeatlast.co.uk'],
+              replyTo: user.email,
+              message: {
+                subject: `⚠️ DIETARY WARNING: Booking Conflict for ${detail.participantName}`,
+                text: `Warning: A booking was completed with a confirmed dietary conflict!\nParticipant: ${detail.participantName}\nActivity: ${detail.activity.title}\nFood Chosen: ${detail.foodChoice}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
+                html: `
+                  <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #ea580c; padding: 20px; border-radius: 15px;">
+                    <h2 style="color: #ea580c; margin-top: 0;">⚠️ Dietary Booking Conflict Confirmed</h2>
+                    <p>A participant was registered with a food option that conflicts with their medical or dietary information on file, and the booker explicitly bypassed the alert.</p>
+                    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                    <div style="background: #fffbeb; padding: 15px; border-radius: 10px; border: 1px solid #fef3c7;">
+                      <p style="margin: 5px 0;"><strong>Participant:</strong> ${detail.participantName}</p>
+                      <p style="margin: 5px 0;"><strong>Activity:</strong> ${detail.activity.title}</p>
+                      <p style="margin: 5px 0;"><strong>Chosen Food Option:</strong> <span style="color: #ea580c; font-weight: bold;">${detail.foodChoice || 'None'}</span></p>
+                      <p style="margin: 5px 0;"><strong>Booker Name:</strong> ${user.name}</p>
+                      <p style="margin: 5px 0;"><strong>Contact Mobile:</strong> ${detail.bookerMobile}</p>
+                      <p style="margin: 5px 0;"><strong>Contact Email:</strong> ${user.email}</p>
+                      <p style="margin: 5px 0;"><strong>Date & Time:</strong> ${detail.activity.date} @ ${detail.activity.time}</p>
+                    </div>
+                    <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                      free@last Hub Automated Dietary Alert
+                    </p>
                   </div>
-                  <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                    free@last Hub Automated Dietary Alert
-                  </p>
-                </div>
-              `
-            }
-          });
-        } catch (err) {
-          console.error("Error raising admin warning for dietary conflict:", err);
+                `
+              }
+            });
+          } catch (err) {
+            console.error("Error raising admin warning for dietary conflict:", err);
+          }
         }
+
+        // 1. Save to global bookings collection for admin log
+        await addDoc(collection(db, path), {
+          bookerName: user.name,
+          participantName: detail.participantName,
+          bookerMobile: detail.bookerMobile,
+          bookingDate: serverTimestamp(),
+          sessionTitle: detail.activity.title,
+          sessionDate: detail.activity.date,
+          sessionTime: detail.activity.time,
+          sessionId: detail.activity.id,
+          userId: user.id,
+          targetEmail: 'jstreet@freeatlast.co.uk',
+          status: 'booked',
+          foodChoice: detail.foodChoice || '',
+          foodConflictConfirmed: detail.foodConflictConfirmed || false,
+          foodConflictWarningRaised: detail.foodConflictConfirmed || false,
+        });
+
+        // 2. Trigger email for the booking
+        await addDoc(collection(db, 'mail'), {
+          to: ['jstreet@freeatlast.co.uk'],
+          replyTo: user.email,
+          message: {
+            subject: `New Booking: ${detail.activity.title}`,
+            text: `Booking for ${detail.activity.title}\nParticipant: ${detail.participantName}\nDate: ${detail.activity.date}\nTime: ${detail.activity.time}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+                <h2 style="color: #2b337e;">New Activity Booking</h2>
+                <p>A new registration has been received for <strong>${detail.activity.title}</strong>.</p>
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                  <p style="margin: 5px 0;"><strong>Session:</strong> ${detail.activity.title}</p>
+                  <p style="margin: 5px 0;"><strong>Session Date:</strong> ${detail.activity.date}</p>
+                  <p style="margin: 5px 0;"><strong>Session Time:</strong> ${detail.activity.time}</p>
+                  <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${detail.participantName}</p>
+                  <p style="margin: 5px 0;"><strong>Booked By:</strong> ${user.name}</p>
+                  <p style="margin: 5px 0;"><strong>Mobile:</strong> ${detail.bookerMobile}</p>
+                  <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+                </div>
+                <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                  System generated booking alert
+                </p>
+              </div>
+            `
+          }
+        });
       }
 
-      // 1. Save to global bookings collection for admin log
-      await addDoc(collection(db, path), {
-        bookerName: user.name,
-        participantName: detail.participantName,
-        bookerMobile: detail.bookerMobile,
-        bookingDate: serverTimestamp(),
-        sessionTitle: detail.activity.title,
-        sessionDate: detail.activity.date,
-        sessionTime: detail.activity.time,
-        sessionId: detail.activity.id,
-        userId: user.id,
-        targetEmail: 'jstreet@freeatlast.co.uk',
-        status: 'booked',
-        foodChoice: detail.foodChoice || '',
-        foodConflictConfirmed: detail.foodConflictConfirmed || false,
-        foodConflictWarningRaised: detail.foodConflictConfirmed || false,
-      });
-
-      // 2. Trigger email for the booking
-      await addDoc(collection(db, 'mail'), {
-        to: ['jstreet@freeatlast.co.uk'],
-        replyTo: user.email,
-        message: {
-          subject: `New Booking: ${detail.activity.title}`,
-          text: `Booking for ${detail.activity.title}\nParticipant: ${detail.participantName}\nDate: ${detail.activity.date}\nTime: ${detail.activity.time}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
-              <h2 style="color: #2b337e;">New Activity Booking</h2>
-              <p>A new registration has been received for <strong>${detail.activity.title}</strong>.</p>
-              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-              <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
-                <p style="margin: 5px 0;"><strong>Session:</strong> ${detail.activity.title}</p>
-                <p style="margin: 5px 0;"><strong>Session Date:</strong> ${detail.activity.date}</p>
-                <p style="margin: 5px 0;"><strong>Session Time:</strong> ${detail.activity.time}</p>
-                <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${detail.participantName}</p>
-                <p style="margin: 5px 0;"><strong>Booked By:</strong> ${user.name}</p>
-                <p style="margin: 5px 0;"><strong>Mobile:</strong> ${detail.bookerMobile}</p>
-                <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
-              </div>
-              <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                System generated booking alert
-              </p>
-            </div>
-          `
-        }
-      });
-
-      // 3. Increment activity count
-      const activityRef = doc(db, 'activities', detail.activity.id);
+      // 3. Increment activity count by the number of booked participants
+      const activityRef = doc(db, 'activities', detailsList[0].activity.id);
       await updateDoc(activityRef, {
-        bookedCount: increment(1)
+        bookedCount: increment(detailsList.length)
       });
       
-      setNotification(`Registration successful for ${detail.participantName}!`);
-      setTimeout(() => setNotification(null), 3000);
+      const namesJoined = detailsList.map(d => d.participantName).join(', ');
+      setNotification(`Registration successful for ${namesJoined}!`);
+      setTimeout(() => setNotification(null), 3500);
     } catch (error: any) {
       console.error("Booking error:", error);
       setNotification(`Booking failed: ${error.message || "Please check your connection"}`);
