@@ -169,6 +169,123 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
   const [activitySearchQuery, setActivitySearchQuery] = useState('');
 
+  // Mail Monitor & Management States
+  const [mailFilter, setMailFilter] = useState<'all' | 'pending' | 'resolved' | 'error'>('all');
+  const [mailSearchQuery, setMailSearchQuery] = useState('');
+  const [selectedMailLog, setSelectedMailLog] = useState<MailLog | null>(null);
+  const [adminMailReplyMap, setAdminMailReplyMap] = useState<{ [mailId: string]: string }>({});
+  const [isSendingMailResponseId, setIsSendingMailResponseId] = useState<string | null>(null);
+
+  const handleMarkMailResolved = async (mailId: string) => {
+    try {
+      await updateDoc(doc(db, 'mail', mailId), {
+        'delivery.state': 'SUCCESS',
+        'delivery.info.response': `Marked as resolved by ${user.name || 'Admin'}`,
+        status: 'RESOLVED',
+        resolvedBy: user.name || 'Admin',
+        resolvedAt: new Date().toISOString()
+      });
+      if (selectedMailLog?.id === mailId) {
+        setSelectedMailLog(prev => prev ? { 
+          ...prev, 
+          status: 'RESOLVED', 
+          resolvedBy: user.name || 'Admin', 
+          resolvedAt: new Date().toISOString(),
+          delivery: { ...(prev.delivery || { attempts: 1, endTime: new Date(), error: null, leaseExpireTime: null, startTime: new Date() }), state: 'SUCCESS' }
+        } : null);
+      }
+    } catch (err) {
+      console.error("Error marking mail resolved:", err);
+      alert("Failed to update status. Please try again.");
+    }
+  };
+
+  const handleMarkAllPendingMailResolved = async () => {
+    const pendingLogs = mailLogs.filter(m => (m.delivery?.state || 'PENDING') === 'PENDING' && m.status !== 'RESOLVED');
+    if (pendingLogs.length === 0) return;
+    if (!window.confirm(`Are you sure you want to mark all ${pendingLogs.length} pending mail logs as Resolved?`)) return;
+
+    try {
+      for (const log of pendingLogs) {
+        await updateDoc(doc(db, 'mail', log.id), {
+          'delivery.state': 'SUCCESS',
+          'delivery.info.response': `Bulk resolved by ${user.name || 'Admin'}`,
+          status: 'RESOLVED',
+          resolvedBy: user.name || 'Admin',
+          resolvedAt: new Date().toISOString()
+        });
+      }
+      alert(`Successfully marked ${pendingLogs.length} pending email logs as Resolved.`);
+    } catch (err) {
+      console.error("Error bulk resolving mail:", err);
+      alert("Error resolving some mail logs.");
+    }
+  };
+
+  const handleDeleteMailLog = async (mailId: string) => {
+    if (!window.confirm("Are you sure you want to delete this mail log entry?")) return;
+    try {
+      await deleteDoc(doc(db, 'mail', mailId));
+      if (selectedMailLog?.id === mailId) setSelectedMailLog(null);
+    } catch (err) {
+      console.error("Error deleting mail log:", err);
+      alert("Failed to delete mail log.");
+    }
+  };
+
+  const handleSendMailResponse = async (log: MailLog) => {
+    const replyText = adminMailReplyMap[log.id]?.trim();
+    if (!replyText) {
+      alert("Please enter a response message before sending.");
+      return;
+    }
+
+    setIsSendingMailResponseId(log.id);
+    try {
+      const recipient = Array.isArray(log.to) ? log.to[0] : log.to;
+
+      // 1. Create a outbound reply document in mail collection so recipient receives email
+      await addDoc(collection(db, 'mail'), {
+        to: recipient,
+        replyTo: user.email || 'info@freeatlast.co.uk',
+        message: {
+          subject: `Re: ${log.message?.subject || 'Hub Support Response'}`,
+          text: `Dear Member,\n\n${replyText}\n\nWarm regards,\n${user.name || 'free@last Staff'}`,
+          html: `
+            <div style="font-family: sans-serif; padding: 25px; color: #2b337e;">
+              <h2 style="color: #f47920; margin-top: 0;">free@last Community Support</h2>
+              <p>Hello,</p>
+              <p>Regarding your recent query <strong>"${log.message?.subject || 'Hub Communication'}"</strong>:</p>
+              <div style="background-color: #f8fafc; padding: 20px; border-radius: 12px; border-left: 4px solid #f47920; margin: 15px 0;">
+                <p style="margin: 0; font-size: 15px; color: #1e293b; font-weight: 500;">${replyText}</p>
+                <p style="margin-top: 10px; font-size: 11px; color: #64748b; uppercase;">Sent by ${user.name || 'free@last Staff'}</p>
+              </div>
+              <p style="font-size: 13px; color: #64748b;">If you have any further questions, feel free to drop by the hub or reply directly to this message.</p>
+            </div>
+          `
+        }
+      });
+
+      // 2. Mark the original mail log as RESOLVED
+      await updateDoc(doc(db, 'mail', log.id), {
+        'delivery.state': 'SUCCESS',
+        'delivery.info.response': `Responded & Handled by ${user.name || 'Admin'}`,
+        status: 'RESOLVED',
+        resolvedBy: user.name || 'Admin',
+        resolvedAt: new Date().toISOString()
+      });
+
+      setAdminMailReplyMap(prev => ({ ...prev, [log.id]: '' }));
+      setIsSendingMailResponseId(null);
+      if (selectedMailLog?.id === log.id) setSelectedMailLog(null);
+      alert(`Response successfully sent to ${recipient} and log marked as Resolved!`);
+    } catch (err) {
+      console.error("Error sending mail response:", err);
+      setIsSendingMailResponseId(null);
+      alert("Failed to send response. Please try again.");
+    }
+  };
+
   useEffect(() => {
     setConfirmDeleteId(null);
     if (selectedUserDetail) {
@@ -3569,79 +3686,340 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       )}
       {activeAdminTab === 'mail' && (
         <div className="animate-fadeIn">
-          <div className="mb-12">
-            <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Mail Delivery Monitor</h2>
-            <p className="text-gray-500 font-light mt-1">Status of system-triggered emails (Bookings, Inquiries, etc).</p>
+          {/* Top Header & Metrics */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
+            <div>
+              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Mail & Email Communications Hub</h2>
+              <p className="text-gray-500 font-light mt-1">Review system email notifications, respond directly to recipients, or manage pending delivery logs.</p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <div className="bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 brand-heading block">Total Emails</span>
+                <span className="text-xl font-bold text-brand-dark-blue brand-heading">{mailLogs.length}</span>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-700 brand-heading block">Pending Action</span>
+                <span className="text-xl font-bold text-amber-600 brand-heading">
+                  {mailLogs.filter(m => (m.delivery?.state || 'PENDING') === 'PENDING' && m.status !== 'RESOLVED').length}
+                </span>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 brand-heading block">Resolved / Sent</span>
+                <span className="text-xl font-bold text-emerald-600 brand-heading">
+                  {mailLogs.filter(m => m.delivery?.state === 'SUCCESS' || m.status === 'RESOLVED').length}
+                </span>
+              </div>
+              <div className="bg-red-50 border border-red-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-red-700 brand-heading block">Delivery Error</span>
+                <span className="text-xl font-bold text-red-600 brand-heading">
+                  {mailLogs.filter(m => m.delivery?.state === 'ERROR').length}
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+          {/* Filter Bar, Search & Bulk Action */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setMailFilter('all')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                  mailFilter === 'all' ? 'bg-brand-dark-blue text-white shadow-xs' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                All Emails ({mailLogs.length})
+              </button>
+              <button
+                onClick={() => setMailFilter('pending')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                  mailFilter === 'pending' ? 'bg-amber-600 text-white shadow-xs' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                ⏳ Pending Action ({mailLogs.filter(m => (m.delivery?.state || 'PENDING') === 'PENDING' && m.status !== 'RESOLVED').length})
+              </button>
+              <button
+                onClick={() => setMailFilter('resolved')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                  mailFilter === 'resolved' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                ✓ Resolved / Sent ({mailLogs.filter(m => m.delivery?.state === 'SUCCESS' || m.status === 'RESOLVED').length})
+              </button>
+              <button
+                onClick={() => setMailFilter('error')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                  mailFilter === 'error' ? 'bg-red-600 text-white shadow-xs' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                ⚠️ Errors ({mailLogs.filter(m => m.delivery?.state === 'ERROR').length})
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 w-full md:w-auto">
+              <input
+                type="text"
+                placeholder="Search mail by recipient or subject..."
+                value={mailSearchQuery}
+                onChange={e => setMailSearchQuery(e.target.value)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-xs w-full md:w-64 focus:outline-none focus:border-brand-orange bg-white"
+              />
+
+              {mailLogs.some(m => (m.delivery?.state || 'PENDING') === 'PENDING' && m.status !== 'RESOLVED') && (
+                <button
+                  onClick={handleMarkAllPendingMailResolved}
+                  className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading bg-slate-800 hover:bg-slate-900 text-white transition-all shrink-0"
+                >
+                  Mark All Pending as Handled
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Table / List View */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden mb-8">
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Recipient</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Subject</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Status</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Last Update</th>
-                    <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Details/Errors</th>
+                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Recipient</th>
+                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Subject & Message</th>
+                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Status</th>
+                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date / Details</th>
+                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {mailLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No mail logs found</td>
-                    </tr>
-                  ) : (
-                    mailLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-8 py-6">
-                          <p className="text-slate-600 font-bold text-xs">{Array.isArray(log.to) ? log.to.join(', ') : log.to}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p className="text-brand-dark-blue font-bold text-xs">{log.message.subject}</p>
-                        </td>
-                        <td className="px-8 py-6">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
-                            log.delivery?.state === 'SUCCESS' ? 'bg-green-100 text-green-600' :
-                            log.delivery?.state === 'ERROR' ? 'bg-red-100 text-red-600' :
-                            'bg-orange-100 text-orange-600'
-                          }`}>
-                            {log.delivery?.state || 'PENDING'}
-                          </span>
-                        </td>
-                        <td className="px-8 py-6">
-                          <p className="text-slate-400 text-[10px] font-medium">
-                            {log.delivery?.endTime ? new Date(log.delivery.endTime.toDate ? log.delivery.endTime.toDate() : log.delivery.endTime).toLocaleString() : 'Waiting...'}
-                          </p>
-                        </td>
-                        <td className="px-8 py-6">
-                          {log.delivery?.error ? (
-                            <p className="text-red-500 text-[10px] font-medium max-w-xs break-words">{log.delivery.error}</p>
-                          ) : (
-                            <p className="text-slate-400 text-[10px] italic">No errors reported</p>
-                          )}
-                          {log.delivery?.info?.response && (
-                            <p className="text-slate-500 text-[9px] mt-1">{log.delivery.info.response}</p>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  {(() => {
+                    const filtered = mailLogs.filter(log => {
+                      const isResolved = log.status === 'RESOLVED' || log.delivery?.state === 'SUCCESS';
+                      const isPending = (log.delivery?.state || 'PENDING') === 'PENDING' && log.status !== 'RESOLVED';
+                      const isErr = log.delivery?.state === 'ERROR';
+
+                      if (mailFilter === 'pending' && !isPending) return false;
+                      if (mailFilter === 'resolved' && !isResolved) return false;
+                      if (mailFilter === 'error' && !isErr) return false;
+
+                      if (mailSearchQuery) {
+                        const q = mailSearchQuery.toLowerCase();
+                        const rec = (Array.isArray(log.to) ? log.to.join(', ') : log.to || '').toLowerCase();
+                        const subj = (log.message?.subject || '').toLowerCase();
+                        const txt = (log.message?.text || '').toLowerCase();
+                        return rec.includes(q) || subj.includes(q) || txt.includes(q);
+                      }
+                      return true;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={5} className="px-8 py-16 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">
+                            No emails matching current criteria
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return filtered.map(log => {
+                      const recipientStr = Array.isArray(log.to) ? log.to.join(', ') : log.to || 'Unknown';
+                      const isResolved = log.status === 'RESOLVED' || log.delivery?.state === 'SUCCESS';
+                      const isPending = (log.delivery?.state || 'PENDING') === 'PENDING' && log.status !== 'RESOLVED';
+                      const isErr = log.delivery?.state === 'ERROR';
+
+                      const mailtoUrl = `mailto:${encodeURIComponent(recipientStr)}?subject=${encodeURIComponent(`Re: ${log.message?.subject || 'free@last Hub Query'}`)}&body=${encodeURIComponent(`Dear Member,\n\nIn response to your query regarding "${log.message?.subject || 'Community Hub'}":\n\n[Type your response message here]\n\nWarm regards,\nfree@last Nechells Team`)}`;
+
+                      return (
+                        <tr key={log.id} className={`hover:bg-slate-50/70 transition-colors ${isPending ? 'bg-amber-50/15' : ''}`}>
+                          <td className="px-6 py-5">
+                            <p className="text-brand-dark-blue font-bold text-xs">{recipientStr}</p>
+                            {log.replyTo && <p className="text-[10px] text-slate-400">Reply-to: {log.replyTo}</p>}
+                          </td>
+                          <td className="px-6 py-5 max-w-sm">
+                            <p className="text-brand-dark-blue font-bold text-xs truncate">{log.message?.subject || 'No Subject'}</p>
+                            <p className="text-slate-500 text-[11px] line-clamp-1 italic mt-0.5 font-light">
+                              {log.message?.text || (log.message?.html ? log.message.html.replace(/<[^>]+>/g, '') : '') || 'No text snippet'}
+                            </p>
+                          </td>
+                          <td className="px-6 py-5">
+                            <span className={`px-3 py-1 rounded-full text-[9.5px] font-bold uppercase tracking-widest ${
+                              isResolved ? 'bg-emerald-100 text-emerald-700' :
+                              isErr ? 'bg-red-100 text-red-600' :
+                              'bg-amber-100 text-amber-800 animate-pulse'
+                            }`}>
+                              {isResolved ? (log.status === 'RESOLVED' ? 'RESOLVED' : 'DELIVERED') : isErr ? 'ERROR' : 'PENDING ACTION'}
+                            </span>
+                            {log.resolvedBy && (
+                              <p className="text-[9px] text-slate-400 mt-1">by {log.resolvedBy}</p>
+                            )}
+                          </td>
+                          <td className="px-6 py-5">
+                            <p className="text-slate-500 text-[10px] font-medium">
+                              {log.delivery?.endTime ? new Date(log.delivery.endTime.toDate ? log.delivery.endTime.toDate() : log.delivery.endTime).toLocaleString() : 'Logged in hub'}
+                            </p>
+                            {log.delivery?.error && (
+                              <p className="text-red-500 text-[9.5px] font-medium truncate max-w-[140px]">{log.delivery.error}</p>
+                            )}
+                          </td>
+                          <td className="px-6 py-5 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {/* View / Respond Modal Button */}
+                              <button
+                                onClick={() => setSelectedMailLog(log)}
+                                className="px-3 py-1.5 bg-brand-dark-blue text-white rounded-lg text-[10px] font-bold uppercase tracking-wider brand-heading hover:bg-brand-orange transition-all"
+                              >
+                                View & Reply
+                              </button>
+
+                              {/* Desktop Mail Client Shortcut */}
+                              <a
+                                href={mailtoUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all"
+                                title="Open in Desktop Email App (Outlook / Mail)"
+                              >
+                                <Icons.Mail className="w-3.5 h-3.5" />
+                              </a>
+
+                              {/* Quick Mark Resolved */}
+                              {!isResolved && (
+                                <button
+                                  onClick={() => handleMarkMailResolved(log.id)}
+                                  className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white rounded-lg text-[9.5px] font-bold uppercase tracking-wider transition-all"
+                                  title="Mark as Handled / Resolved"
+                                >
+                                  ✓ Resolve
+                                </button>
+                              )}
+
+                              {/* Delete */}
+                              <button
+                                onClick={() => handleDeleteMailLog(log.id)}
+                                className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                title="Delete Log"
+                              >
+                                <Icons.Trash className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>
           </div>
-          
-          <div className="mt-8 bg-blue-50 p-8 rounded-3xl border border-blue-100">
-            <h3 className="text-blue-900 font-bold flex items-center gap-2 mb-2">
+
+          {/* Help Banner */}
+          <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-lg border border-slate-800">
+            <h3 className="text-brand-orange font-bold text-lg flex items-center gap-2 mb-2 brand-heading uppercase">
               <Icons.Shield className="w-5 h-5" />
-              Developer Guidance for info@freeatlast.co.uk
+              Email & Notification Guidance for free@last Staff
             </h3>
-            <p className="text-blue-700 text-sm leading-relaxed">
-              If status is <strong>PENDING</strong> for more than 5 minutes, the Firebase extension might be missing SMTP credentials in the console. 
-              If status is <strong>ERROR</strong>, check the "Details/Errors" column above for specific mail server reject messages (e.g. invalid password or unauthorized IP).
+            <p className="text-slate-300 text-sm leading-relaxed font-light">
+              System emails generated by hub features (such as urgent wellbeing alerts, registration notices, and partner inquiries) enter this queue.
+              You can click <strong>"View & Reply"</strong> on any entry to compose a direct reply email right from this dashboard, click the email icon to launch your computer's mail application (Outlook/Gmail), or click <strong>"Mark as Handled"</strong> to update the status to Resolved.
             </p>
           </div>
+
+          {/* Selected Mail Inspector & Reply Modal */}
+          {selectedMailLog && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fadeIn">
+              <div className="bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 max-w-2xl w-full p-8 relative overflow-hidden max-h-[90vh] flex flex-col">
+                <button
+                  onClick={() => setSelectedMailLog(null)}
+                  className="absolute top-6 right-6 p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                >
+                  ✕
+                </button>
+
+                <div className="flex items-center gap-3 mb-4">
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                    selectedMailLog.status === 'RESOLVED' || selectedMailLog.delivery?.state === 'SUCCESS'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {selectedMailLog.status === 'RESOLVED' ? 'RESOLVED' : selectedMailLog.delivery?.state || 'PENDING ACTION'}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">
+                    {selectedMailLog.delivery?.endTime ? new Date(selectedMailLog.delivery.endTime.toDate ? selectedMailLog.delivery.endTime.toDate() : selectedMailLog.delivery.endTime).toLocaleString() : ''}
+                  </span>
+                </div>
+
+                <h3 className="text-2xl font-bold brand-heading text-brand-dark-blue mb-1">
+                  {selectedMailLog.message?.subject || 'Email Communication'}
+                </h3>
+                <p className="text-xs text-slate-500 font-semibold mb-6">
+                  To: <span className="text-brand-orange font-bold">{Array.isArray(selectedMailLog.to) ? selectedMailLog.to.join(', ') : selectedMailLog.to}</span>
+                </p>
+
+                {/* Email Content Snippet */}
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 overflow-y-auto max-h-48 text-sm text-slate-700 leading-relaxed font-light mb-6">
+                  {selectedMailLog.message?.text ? (
+                    <p className="whitespace-pre-wrap">{selectedMailLog.message.text}</p>
+                  ) : selectedMailLog.message?.html ? (
+                    <div dangerouslySetInnerHTML={{ __html: selectedMailLog.message.html }} />
+                  ) : (
+                    <p className="italic text-slate-400">No message content available</p>
+                  )}
+                </div>
+
+                {/* Admin Response Composer */}
+                <div className="bg-brand-dark-blue/5 p-6 rounded-2xl border border-brand-dark-blue/10 flex-grow">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-brand-dark-blue mb-2 brand-heading flex items-center gap-2">
+                    <Icons.Send className="w-4 h-4 text-brand-orange" />
+                    Reply to {Array.isArray(selectedMailLog.to) ? selectedMailLog.to[0] : selectedMailLog.to}
+                  </label>
+                  <textarea
+                    rows={4}
+                    placeholder="Write your email response here... (This will dispatch a reply and update status to Resolved)"
+                    value={adminMailReplyMap[selectedMailLog.id] || ''}
+                    onChange={e => setAdminMailReplyMap({ ...adminMailReplyMap, [selectedMailLog.id]: e.target.value })}
+                    className="w-full p-4 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-brand-orange leading-relaxed resize-none mb-4"
+                  ></textarea>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <a
+                      href={`mailto:${encodeURIComponent(Array.isArray(selectedMailLog.to) ? selectedMailLog.to[0] : selectedMailLog.to)}?subject=${encodeURIComponent(`Re: ${selectedMailLog.message?.subject || 'free@last Hub'}`)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold brand-heading uppercase tracking-wider transition-all flex items-center gap-1.5"
+                    >
+                      <Icons.Mail className="w-3.5 h-3.5" />
+                      <span>Open Outlook/Email App</span>
+                    </a>
+
+                    <div className="flex items-center gap-2">
+                      {selectedMailLog.status !== 'RESOLVED' && (
+                        <button
+                          onClick={() => handleMarkMailResolved(selectedMailLog.id)}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider transition-all"
+                        >
+                          ✓ Mark Resolved
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleSendMailResponse(selectedMailLog)}
+                        disabled={isSendingMailResponseId === selectedMailLog.id || !adminMailReplyMap[selectedMailLog.id]?.trim()}
+                        style={{ backgroundColor: COLORS.secondary }}
+                        className="px-6 py-2.5 text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:bg-brand-orange transition-all shadow-md flex items-center gap-2 disabled:opacity-40"
+                      >
+                        {isSendingMailResponseId === selectedMailLog.id ? (
+                          <span>Sending...</span>
+                        ) : (
+                          <>
+                            <Icons.Send className="w-3.5 h-3.5" />
+                            <span>Send Reply Email</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

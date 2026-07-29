@@ -202,6 +202,10 @@ export interface MailLog {
       response: string;
     }
   };
+  status?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  replyTo?: string;
 }
 
 export interface Booking {

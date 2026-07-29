@@ -565,11 +565,16 @@ const App: React.FC = () => {
       setMailLogs([]);
       return;
     }
-    const q = query(collection(db, 'mail'), orderBy('message.subject', 'desc')); 
+    const q = query(collection(db, 'mail')); 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: MailLog[] = [];
       snapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as MailLog);
+      });
+      items.sort((a, b) => {
+        const timeA = a.delivery?.endTime?.seconds ? a.delivery.endTime.seconds * 1000 : 0;
+        const timeB = b.delivery?.endTime?.seconds ? b.delivery.endTime.seconds * 1000 : 0;
+        return timeB - timeA;
       });
       setMailLogs(items);
       localStorage.setItem('cached_mail_logs', JSON.stringify(items));
