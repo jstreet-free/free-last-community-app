@@ -86,7 +86,7 @@
     },
     "inquiry": {
       "title": "Inquiry",
-      "description": "A contact inquiry from the website.",
+      "description": "A contact inquiry or member question.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -97,7 +97,12 @@
         "type": { "type": "string" },
         "targetEmail": { "type": "string" },
         "timestamp": { "type": "string", "description": "Server timestamp" },
-        "status": { "type": "string" }
+        "status": { "type": "string", "enum": ["new", "read", "contacted", "replied"] },
+        "userId": { "type": "string" },
+        "reply": { "type": "string" },
+        "repliedAt": { "type": "string" },
+        "repliedBy": { "type": "string" },
+        "replies": { "type": "array" }
       },
       "required": ["name", "email", "mobile", "message"]
     },

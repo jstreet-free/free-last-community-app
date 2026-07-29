@@ -61,15 +61,14 @@ service cloud.firestore {
     }
 
     function isValidInquiry(data) {
-      return data.keys().hasAll(['name', 'email', 'mobile', 'message', 'type', 'timestamp', 'status', 'targetEmail'])
+      return data.keys().hasAll(['name', 'email', 'mobile', 'message', 'type', 'status', 'targetEmail'])
         && data.name is string && data.name.size() <= 200
         && data.email is string && data.email.size() <= 200
         && data.mobile is string 
         && data.message is string && data.message.size() <= 10000
         && data.type is string
         && data.status is string
-        && data.targetEmail is string
-        && data.timestamp is timestamp;
+        && data.targetEmail is string;
     }
 
     function isValidBooking(data) {
@@ -197,7 +196,9 @@ service cloud.firestore {
 
     match /inquiries/{inquiryId} {
       allow create: if isValidInquiry(incoming());
-      allow read, delete, update: if isAdmin();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     match /mail/{mailId} {

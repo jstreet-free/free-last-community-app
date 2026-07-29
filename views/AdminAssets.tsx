@@ -8,7 +8,7 @@ import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
 import { AdminNeedsManager } from '../components/AdminNeedsManager';
 
 import { db } from '../services/firebase';
-import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 interface AdminAssetsProps {
   user: User;
@@ -486,11 +486,81 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
-  const handleUpdateInquiryStatus = async (id: string, status: 'new' | 'read' | 'contacted') => {
+  const [adminReplyTextMap, setAdminReplyTextMap] = useState<{ [id: string]: string }>({});
+  const [sendingReplyId, setSendingReplyId] = useState<string | null>(null);
+  const [inquiryFilter, setInquiryFilter] = useState<'all' | 'new' | 'replied'>('all');
+
+  const handleUpdateInquiryStatus = async (id: string, status: 'new' | 'read' | 'contacted' | 'replied') => {
     try {
       await updateDoc(doc(db, 'inquiries', id), { status });
     } catch (error) {
       console.error("Error updating inquiry status:", error);
+    }
+  };
+
+  const handleSendAdminReply = async (inquiry: Inquiry) => {
+    const replyMsg = adminReplyTextMap[inquiry.id]?.trim();
+    if (!replyMsg) {
+      alert("Please enter a response message before sending.");
+      return;
+    }
+
+    setSendingReplyId(inquiry.id);
+    try {
+      const adminReplyItem = {
+        sender: 'admin' as const,
+        senderName: user.name || 'free@last Admin',
+        message: replyMsg,
+        timestamp: new Date().toISOString()
+      };
+
+      // 1. Update inquiry document in Firestore
+      await updateDoc(doc(db, 'inquiries', inquiry.id), {
+        status: 'replied',
+        reply: replyMsg,
+        repliedAt: new Date().toISOString(),
+        repliedBy: user.name || 'free@last Admin',
+        replies: arrayUnion(adminReplyItem)
+      });
+
+      // 2. Trigger email to member if email is available
+      const recipientEmail = inquiry.email || inquiry.targetEmail;
+      if (recipientEmail && recipientEmail.includes('@')) {
+        try {
+          await addDoc(collection(db, 'mail'), {
+            to: recipientEmail,
+            message: {
+              subject: `free@last Response: ${inquiry.type || 'Question'}`,
+              text: `Dear ${inquiry.name},\n\nThank you for reaching out to free@last.\n\nStaff Response:\n${replyMsg}\n\nYour Original Question:\n"${inquiry.message}"\n\nWarm regards,\nfree@last Nechells Team`,
+              html: `
+                <div style="font-family: sans-serif; padding: 20px; color: #2b337e;">
+                  <h2 style="color: #f47920;">free@last Member Support Response</h2>
+                  <p>Dear <strong>${inquiry.name}</strong>,</p>
+                  <p>Thank you for reaching out to free@last. Here is the response to your query from our team:</p>
+                  <div style="background-color: #ecfdf5; padding: 18px; border-radius: 12px; border-left: 4px solid #10b981; margin: 15px 0;">
+                    <p style="margin: 0; font-size: 15px; color: #064e3b; font-weight: 500;">${replyMsg}</p>
+                    <p style="margin-top: 10px; font-size: 11px; color: #047857; text-transform: uppercase;">Responded by ${user.name || 'free@last Team'}</p>
+                  </div>
+                  <div style="background-color: #f8fafc; padding: 12px; border-radius: 8px; color: #64748b; font-size: 13px;">
+                    <p style="margin: 0;"><strong>Original Query (${inquiry.type || 'General'}):</strong></p>
+                    <p style="margin: 5px 0 0 0; italic;">"${inquiry.message}"</p>
+                  </div>
+                  <p style="margin-top: 20px; font-size: 12px; color: #94a3b8;">You can also view this response inside your free@last member account dashboard anytime.</p>
+                </div>
+              `
+            }
+          });
+        } catch (mailErr) {
+          console.warn("Mail dispatch warning:", mailErr);
+        }
+      }
+
+      setAdminReplyTextMap(prev => ({ ...prev, [inquiry.id]: '' }));
+      setSendingReplyId(null);
+    } catch (error: any) {
+      console.error("Error sending admin reply:", error);
+      setSendingReplyId(null);
+      alert("Failed to send response: " + (error.message || "Unknown error"));
     }
   };
 
@@ -2075,71 +2145,234 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
       {activeAdminTab === 'inquiries' && (
         <div className="animate-fadeIn">
-          <div className="mb-12">
-            <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">User Inquiries</h2>
-            <p className="text-gray-500 font-light mt-1">Review "Get Involved" requests from the homepage.</p>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <div>
+              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Member Questions & Inquiries</h2>
+              <p className="text-gray-500 font-light mt-1">Review and respond directly to questions and queries from hub members and site visitors.</p>
+            </div>
+            
+            {/* Quick Metrics */}
+            <div className="flex gap-3">
+              <div className="bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 brand-heading block">Total</span>
+                <span className="text-xl font-bold text-brand-dark-blue brand-heading">{inquiries.length}</span>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-700 brand-heading block">Pending Reply</span>
+                <span className="text-xl font-bold text-amber-600 brand-heading">
+                  {inquiries.filter(i => i.status === 'new' || i.status === 'read').length}
+                </span>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 brand-heading block">Replied</span>
+                <span className="text-xl font-bold text-emerald-600 brand-heading">
+                  {inquiries.filter(i => i.status === 'replied').length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex gap-2 mb-6">
+            <button
+              onClick={() => setInquiryFilter('all')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                inquiryFilter === 'all'
+                  ? 'bg-brand-dark-blue text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              All Questions ({inquiries.length})
+            </button>
+            <button
+              onClick={() => setInquiryFilter('new')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                inquiryFilter === 'new'
+                  ? 'bg-brand-orange text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              Awaiting Reply ({inquiries.filter(i => i.status === 'new' || i.status === 'read').length})
+            </button>
+            <button
+              onClick={() => setInquiryFilter('replied')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest brand-heading transition-all ${
+                inquiryFilter === 'replied'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              Replied ({inquiries.filter(i => i.status === 'replied').length})
+            </button>
           </div>
 
           <div className="grid grid-cols-1 gap-6">
             {inquiries.length === 0 ? (
               <div className="bg-slate-50 rounded-[2rem] p-16 text-center border-2 border-dashed border-slate-200">
                 <Icons.Heart className="mx-auto h-12 w-12 text-slate-300 mb-4" />
-                <p className="text-slate-400 font-bold brand-heading uppercase tracking-widest text-sm">No inquiries yet</p>
+                <p className="text-slate-400 font-bold brand-heading uppercase tracking-widest text-sm">No questions or inquiries recorded</p>
               </div>
             ) : (
-              inquiries.map((inquiry) => (
-                <div key={inquiry.id} className={`p-8 rounded-[2rem] border transition-all ${inquiry.status === 'new' ? 'bg-brand-orange/5 border-brand-orange/20 shadow-sm' : 'bg-white border-slate-100 hover:shadow-md'}`}>
-                  <div className="flex flex-col md:flex-row justify-between gap-6">
-                    <div className="flex-grow">
-                      <div className="flex items-center gap-3 mb-4">
-                        <span className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest brand-heading ${
-                          inquiry.status === 'new' ? 'bg-brand-orange text-white' : 
-                          inquiry.status === 'read' ? 'bg-slate-100 text-slate-400' : 
-                          'bg-green-500 text-white'
-                        }`}>
-                          {inquiry.status}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
-                          {inquiry.timestamp?.toDate ? inquiry.timestamp.toDate().toLocaleString() : 'Recent'}
-                        </span>
+              inquiries
+                .filter(inquiry => {
+                  if (inquiryFilter === 'new') return inquiry.status === 'new' || inquiry.status === 'read';
+                  if (inquiryFilter === 'replied') return inquiry.status === 'replied';
+                  return true;
+                })
+                .map((inquiry) => (
+                  <div 
+                    key={inquiry.id} 
+                    className={`p-8 rounded-[2rem] border transition-all ${
+                      inquiry.status === 'new' 
+                        ? 'bg-brand-orange/5 border-brand-orange/30 shadow-sm' 
+                        : inquiry.status === 'replied'
+                        ? 'bg-emerald-50/40 border-emerald-200'
+                        : 'bg-white border-slate-100 hover:shadow-md'
+                    }`}
+                  >
+                    <div className="flex flex-col lg:flex-row justify-between gap-6">
+                      <div className="flex-grow">
+                        {/* Header Badges */}
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest brand-heading ${
+                            inquiry.status === 'replied' ? 'bg-emerald-600 text-white' : 
+                            inquiry.status === 'new' ? 'bg-brand-orange text-white' : 
+                            inquiry.status === 'read' ? 'bg-blue-600 text-white' : 
+                            'bg-green-500 text-white'
+                          }`}>
+                            {inquiry.status === 'replied' ? 'Replied' : inquiry.status}
+                          </span>
+                          <span className="px-3 py-1 bg-brand-dark-blue/10 text-brand-dark-blue rounded-lg text-[9px] font-bold uppercase tracking-widest brand-heading">
+                            {inquiry.type || 'General'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-bold brand-heading uppercase ml-auto sm:ml-0">
+                            {inquiry.timestamp?.toDate ? inquiry.timestamp.toDate().toLocaleString() : 'Recent'}
+                          </span>
+                        </div>
+
+                        {/* Person Info */}
+                        <div className="mb-4">
+                          <h3 className="text-2xl font-bold brand-heading text-brand-dark-blue flex items-center gap-2">
+                            {inquiry.name}
+                            {inquiry.userId && (
+                              <span className="text-[10px] font-bold bg-brand-orange/10 text-brand-orange px-2 py-0.5 rounded-full uppercase">
+                                Registered Member
+                              </span>
+                            )}
+                          </h3>
+                          <div className="flex flex-wrap gap-4 text-xs font-semibold text-slate-500 mt-1">
+                            {inquiry.email && <span className="text-brand-dark-blue">✉ {inquiry.email}</span>}
+                            {inquiry.mobile && <span className="text-brand-orange">📱 {inquiry.mobile}</span>}
+                          </div>
+                        </div>
+
+                        {/* Question Text */}
+                        <div className="bg-white p-5 rounded-2xl border border-slate-100 italic text-slate-700 font-medium leading-relaxed mb-6 shadow-2xs">
+                          "{inquiry.message}"
+                        </div>
+
+                        {/* Discussion / Response History */}
+                        {(inquiry.reply || (inquiry.replies && inquiry.replies.length > 0)) && (
+                          <div className="mb-6 p-5 bg-emerald-50/80 rounded-2xl border border-emerald-200">
+                            <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-widest brand-heading mb-3 flex items-center gap-1.5">
+                              <Icons.Check className="w-4 h-4 text-emerald-600" />
+                              Staff Response History
+                            </h4>
+                            
+                            {inquiry.reply && (!inquiry.replies || inquiry.replies.length === 0) && (
+                              <div className="text-xs text-emerald-950 leading-relaxed font-medium">
+                                <p className="mb-1 text-[10px] font-bold text-emerald-700 uppercase brand-heading">
+                                  Responded by {inquiry.repliedBy || 'free@last Staff'} {inquiry.repliedAt ? `on ${new Date(inquiry.repliedAt).toLocaleString()}` : ''}
+                                </p>
+                                <p className="bg-white p-3.5 rounded-xl border border-emerald-100">{inquiry.reply}</p>
+                              </div>
+                            )}
+
+                            {inquiry.replies && inquiry.replies.map((rep, rIdx) => (
+                              <div 
+                                key={rIdx} 
+                                className={`mb-2 p-3.5 rounded-xl text-xs leading-relaxed ${
+                                  rep.sender === 'admin'
+                                    ? 'bg-white text-emerald-950 border border-emerald-200'
+                                    : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-1 text-[9.5px] font-bold uppercase brand-heading opacity-70">
+                                  <span>{rep.senderName} ({rep.sender === 'admin' ? 'Staff' : 'Member'})</span>
+                                  <span>{rep.timestamp ? new Date(rep.timestamp).toLocaleString() : ''}</span>
+                                </div>
+                                <p className="font-medium">{rep.message}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Admin Response Composer */}
+                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                          <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-2 brand-heading flex items-center gap-2">
+                            <Icons.Reply className="w-4 h-4 text-brand-orange" />
+                            Send Staff Response to {inquiry.name}
+                          </label>
+                          <textarea
+                            rows={3}
+                            placeholder={`Type your reply to ${inquiry.name} here... (This will be visible in their member portal and emailed to them)`}
+                            value={adminReplyTextMap[inquiry.id] || ''}
+                            onChange={e => setAdminReplyTextMap({ ...adminReplyTextMap, [inquiry.id]: e.target.value })}
+                            className="w-full p-4 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-brand-orange leading-relaxed resize-none mb-3"
+                          ></textarea>
+                          
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => handleSendAdminReply(inquiry)}
+                              disabled={sendingReplyId === inquiry.id || !adminReplyTextMap[inquiry.id]?.trim()}
+                              style={{ backgroundColor: COLORS.secondary }}
+                              className="px-6 py-2.5 text-white rounded-xl font-bold text-xs uppercase tracking-widest brand-heading hover:bg-brand-orange transition-all shadow-md flex items-center gap-2 disabled:opacity-40"
+                            >
+                              {sendingReplyId === inquiry.id ? (
+                                <span>Sending Response...</span>
+                              ) : (
+                                <>
+                                  <Icons.Send className="w-3.5 h-3.5" />
+                                  <span>Send Reply & Email</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <h3 className="text-2xl font-bold brand-heading text-brand-dark-blue mb-2">{inquiry.name}</h3>
-                      <p className="text-brand-orange font-bold text-sm mb-4">{inquiry.mobile}</p>
-                      <div className="bg-slate-50 p-6 rounded-2xl italic text-slate-600 font-light leading-relaxed">
-                        "{inquiry.message}"
+
+                      {/* Action Menu */}
+                      <div className="flex flex-col gap-2 min-w-[180px]">
+                        {inquiry.status === 'new' && (
+                          <button 
+                            onClick={() => handleUpdateInquiryStatus(inquiry.id, 'read')}
+                            className="w-full px-5 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest hover:border-brand-orange hover:text-brand-orange transition-all"
+                          >
+                            Mark Under Review
+                          </button>
+                        )}
+                        {inquiry.status !== 'contacted' && (
+                          <button 
+                            onClick={() => handleUpdateInquiryStatus(inquiry.id, 'contacted')}
+                            className="w-full px-5 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest hover:bg-slate-200 transition-all"
+                          >
+                            Mark Contacted
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => handleDeleteInquiry(inquiry.id)}
+                          className={`w-full px-5 py-2.5 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
+                            deletingId === inquiry.id 
+                              ? 'bg-red-600 text-white animate-pulse' 
+                              : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                          }`}
+                        >
+                          {deletingId === inquiry.id ? 'Confirm Delete?' : 'Delete Inquiry'}
+                        </button>
                       </div>
-                    </div>
-                    <div className="flex flex-col gap-2 min-w-[200px]">
-                      {inquiry.status === 'new' && (
-                        <button 
-                          onClick={() => handleUpdateInquiryStatus(inquiry.id, 'read')}
-                          className="w-full px-6 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest hover:border-brand-orange hover:text-brand-orange transition-all"
-                        >
-                          Mark as Read
-                        </button>
-                      )}
-                      {inquiry.status !== 'contacted' && (
-                        <button 
-                          onClick={() => handleUpdateInquiryStatus(inquiry.id, 'contacted')}
-                          className="w-full px-6 py-3 bg-green-500 text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest hover:brightness-110 transition-all shadow-md"
-                        >
-                          Mark Contacted
-                        </button>
-                      )}
-                      <button 
-                        onClick={() => handleDeleteInquiry(inquiry.id)}
-                        className={`w-full px-6 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
-                          deletingId === inquiry.id 
-                            ? 'bg-red-600 text-white animate-pulse' 
-                            : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
-                        }`}
-                      >
-                        {deletingId === inquiry.id ? 'Confirm?' : 'Delete Record'}
-                      </button>
                     </div>
                   </div>
-                </div>
-              ))
+                ))
             )}
           </div>
         </div>

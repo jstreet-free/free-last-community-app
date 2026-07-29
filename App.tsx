@@ -13,6 +13,7 @@ import { TeamRegistration } from './views/TeamRegistration';
 import { FriendsOf } from './views/FriendsOf';
 import { Videos } from './views/Videos';
 import { PhotoPolicyModal } from './components/PhotoPolicyModal';
+import { MemberSupportWidget } from './components/MemberSupportWidget';
 import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
@@ -305,12 +306,27 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Sync inquiries from Firestore
+  // Sync inquiries from Firestore based on user role
   useEffect(() => {
-    const unsubscribe = onSnapshot(query(collection(db, 'inquiries'), orderBy('timestamp', 'desc')), (snapshot) => {
+    let q;
+    if (user?.role === 'admin') {
+      q = query(collection(db, 'inquiries'), orderBy('timestamp', 'desc'));
+    } else if (user?.id) {
+      q = query(collection(db, 'inquiries'), where('userId', '==', user.id));
+    } else {
+      setInquiries([]);
+      return;
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: Inquiry[] = [];
       snapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as Inquiry);
+      });
+      items.sort((a, b) => {
+        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0);
+        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
+        return timeB - timeA;
       });
       setInquiries(items);
       localStorage.setItem('cached_inquiries', JSON.stringify(items));
@@ -318,7 +334,7 @@ const App: React.FC = () => {
       console.error("Inquiries snapshot error:", error);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user?.role, user?.id]);
 
   // Sync all session registrations from Firestore (Admin only)
   useEffect(() => {
@@ -1260,8 +1276,8 @@ const App: React.FC = () => {
       return <MemberRegistration user={user} onComplete={handleCompleteRegistration} />;
     }
 
-    // Friend access restriction: Friends only have access to home, photos (gallery), and responding on friends page
-    if (user?.role === 'friend' && activeTab !== 'home' && activeTab !== 'gallery' && activeTab !== 'friends') {
+    // Friend access restriction: Friends have access to home, photos (gallery), wellbeing, and responding on friends page
+    if (user?.role === 'friend' && activeTab !== 'home' && activeTab !== 'gallery' && activeTab !== 'friends' && activeTab !== 'wellbeing') {
       return <FriendsOf user={user} setActiveTab={setActiveTab} />;
     }
 
@@ -1297,7 +1313,7 @@ const App: React.FC = () => {
       case 'team':
         return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'wellbeing':
-        return (user?.role === 'member' || user?.role === 'team' || user?.role === 'admin') ? <MemberWellbeing user={user!} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return user ? <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
@@ -1349,6 +1365,7 @@ const App: React.FC = () => {
         }} />
       )}
       {renderContent()}
+      <MemberSupportWidget user={user} inquiries={inquiries} />
     </Layout>
   );
 };

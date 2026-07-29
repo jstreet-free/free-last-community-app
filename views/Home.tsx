@@ -131,7 +131,9 @@ export const Home: React.FC<HomeProps> = ({
         type: 'Get Involved',
         timestamp: serverTimestamp(),
         status: 'new',
-        targetEmail: 'jstreet@freeatlast.co.uk'
+        targetEmail: 'jstreet@freeatlast.co.uk',
+        userId: user?.id || null,
+        replies: []
       });
 
       // 2. Trigger actual email via 'mail' collection

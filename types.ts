@@ -115,11 +115,16 @@ export interface MoodLog {
   id: string;
   memberId: string;
   memberName: string;
+  memberPhone?: string;
+  memberEmail?: string;
   date: string;
   emotion: string;
   impactText: string;
   aiResponse?: string;
   isUrgent?: boolean;
+  staffResponse?: string;
+  staffRespondedAt?: string;
+  staffRespondedBy?: string;
 }
 
 export interface Announcement {
@@ -149,15 +154,29 @@ export interface ImpactStory {
   image: string;
 }
 
+export interface InquiryReply {
+  id?: string;
+  sender: 'member' | 'admin';
+  senderName: string;
+  message: string;
+  timestamp: string;
+}
+
 export interface Inquiry {
   id: string;
   name: string;
+  email?: string;
   mobile: string;
   message: string;
   type: string;
   timestamp: any;
-  status: 'new' | 'read' | 'contacted';
+  status: 'new' | 'read' | 'contacted' | 'replied';
   targetEmail: string;
+  userId?: string;
+  reply?: string;
+  repliedAt?: any;
+  repliedBy?: string;
+  replies?: InquiryReply[];
 }
 
 export interface MailLog {
