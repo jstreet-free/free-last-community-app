@@ -39,6 +39,8 @@ export interface MemberProfile {
   livingWith: string;
   ethnicity?: string;
   religion?: string;
+  mediaConsent?: boolean;
+  medicalConsent?: boolean;
   
   // For Teenager mode
   teenagerDetails?: {
@@ -215,6 +217,7 @@ export interface Booking {
   bookerMobile: string;
   bookingDate: any;
   sessionTitle: string;
+  sessionCategory?: string;
   sessionDate: string;
   sessionTime: string;
   sessionId: string;

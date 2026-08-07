@@ -1027,7 +1027,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const isMemberUser = (u: User) => {
-    return (u.role === 'member' || !u.role) && !isFriendUser(u) && u.role !== 'team' && u.role !== 'admin';
+    return (!u.role || u.role === 'member') && !isFriendUser(u);
   };
 
   const subTabFilteredUsers = filteredUsers.filter(u => {
@@ -3535,7 +3535,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               </div>
                               <div className="p-4 bg-slate-50 rounded-xl">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Mobile</p>
-                                <p className="text-sm font-bold text-brand-dark-blue">{selectedUserDetail.profile.teenagerDetails.teenagerMobile || 'N/A'}</p>
+                                <p className="text-sm font-bold text-brand-dark-blue">{selectedUserDetail.profile.teenagerDetails.ownMobile || 'N/A'}</p>
                               </div>
                             </div>
                             <div className="p-6 bg-orange-50 rounded-2xl border border-orange-100">
