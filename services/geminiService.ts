@@ -1,20 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.API_KEY;
-let ai: GoogleGenAI | null = null;
-
-if (apiKey) {
-  ai = new GoogleGenAI({ apiKey });
-} else {
-  console.warn("GoogleGenAI API key is not set. Gemini services will use fallback responses in the browser.");
-}
+// Always use named parameter and direct process.env.API_KEY reference
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export async function getWellbeingSupport(emotion: string, impactText: string): Promise<string> {
-  if (!ai) {
-    console.warn("Gemini API client unavailable; returning fallback wellbeing message.");
-    return "Thank you for sharing your journey with us. We're so glad to have you in the free@last family!";
-  }
-
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -33,11 +22,6 @@ export async function getWellbeingSupport(emotion: string, impactText: string): 
 }
 
 export async function summarizeTeamImpact(logs: any[]): Promise<string> {
-  if (!ai) {
-    console.warn("Gemini API client unavailable; returning fallback summary.");
-    return "Your contributions are making a real difference in the lives of people in Nechells.";
-  }
-
   try {
     const logSummary = logs.map(l => `${l.sessionName} (${l.hours}hrs): ${l.description}`).join('; ');
     const response = await ai.models.generateContent({
@@ -61,15 +45,6 @@ export interface CaseStudyAnalysis {
 }
 
 export async function analyzeCaseStudy(content: string): Promise<CaseStudyAnalysis> {
-  if (!ai) {
-    console.warn("Gemini API client unavailable; returning fallback case study analysis.");
-    return {
-      category: "Community Outreach",
-      sentimentScore: 5,
-      aiSummary: "The member shares high appreciation for free@last's role in their personal development."
-    };
-  }
-
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',
