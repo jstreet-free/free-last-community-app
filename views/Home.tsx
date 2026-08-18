@@ -221,6 +221,34 @@ export const Home: React.FC<HomeProps> = ({
         </div>
       </section>
 
+      {/* Pending Account Notice for New Members requiring Home Visit */}
+      {user && user.role === 'member' && user.status !== 'approved' && (
+        <section className="bg-gradient-to-r from-orange-500 to-amber-500 py-6 px-6 shadow-md text-white">
+          <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4 text-left">
+              <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                <Icons.Home className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider brand-heading text-yellow-200">Account Pending Verification</p>
+                <h4 className="text-lg font-bold brand-heading leading-tight">Welcome! A home visit is needed before you can book activities or view photos.</h4>
+                <p className="text-xs opacity-90 font-light mt-0.5">Our team will be in touch shortly to schedule a quick, friendly visit.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                // If user clicks, they can view their details or profile
+                const editBtn = document.querySelector('[title="Edit My Profile & Emergency Numbers"]') as HTMLButtonElement;
+                if (editBtn) editBtn.click();
+              }}
+              className="px-6 py-3 bg-white hover:bg-slate-100 text-brand-dark-blue rounded-xl font-bold text-xs brand-heading uppercase tracking-wider shadow-lg active:scale-95 transition-all shrink-0"
+            >
+              Check My Details
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Active Call for Case Studies / Impact Stories */}
       {activeRequest && user && user.role !== 'admin' && (
         <section className="bg-yellow-50/70 py-12 px-6 shadow-inner border-y border-yellow-100 flex items-center justify-center animate-fadeIn">

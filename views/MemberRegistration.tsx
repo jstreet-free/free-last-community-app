@@ -54,6 +54,28 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     religion: user.profile?.teenagerDetails?.religion || '',
   });
 
+  const getInitialCollectionContacts = (child?: Partial<ChildProfile>) => {
+    if (child?.collectionContacts && child.collectionContacts.length > 0) {
+      return [
+        child.collectionContacts[0] || { name: '', mobile: '' },
+        child.collectionContacts[1] || { name: '', mobile: '' },
+        child.collectionContacts[2] || { name: '', mobile: '' },
+      ];
+    }
+    if (child?.collectionPermissions && child.collectionPermissions.length > 0) {
+      return [
+        { name: child.collectionPermissions[0] || '', mobile: '' },
+        { name: child.collectionPermissions[1] || '', mobile: '' },
+        { name: child.collectionPermissions[2] || '', mobile: '' },
+      ];
+    }
+    return [
+      { name: '', mobile: '' },
+      { name: '', mobile: '' },
+      { name: '', mobile: '' },
+    ];
+  };
+
   // Children Info (for Family mode)
   const [children, setChildren] = useState<ChildProfile[]>(() => {
     return user.profile?.children || [];
@@ -73,7 +95,12 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     swimDistance: '',
     medicalConsent: false,
     mediaConsent: false,
-    collectionPermissions: ['', '', '', '', ''],
+    collectionContacts: [
+      { name: '', mobile: '' },
+      { name: '', mobile: '' },
+      { name: '', mobile: '' }
+    ],
+    collectionPermissions: ['', '', ''],
     ethnicity: '',
     religion: '',
   });
@@ -82,9 +109,11 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
 
   const startEditChild = (index: number) => {
     const childToEdit = children[index];
+    const contacts = getInitialCollectionContacts(childToEdit);
     setCurrentChild({
       ...childToEdit,
-      collectionPermissions: childToEdit.collectionPermissions ? [...childToEdit.collectionPermissions, '', '', '', '', ''].slice(0, 5) : ['', '', '', '', '']
+      collectionContacts: contacts,
+      collectionPermissions: contacts.map(c => c.name)
     });
     setEditingChildIndex(index);
   };
@@ -124,9 +153,18 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       return;
     }
     
+    const validContacts = (currentChild.collectionContacts || [])
+      .filter(c => c.name.trim() !== '' || c.mobile.trim() !== '')
+      .map(c => ({ name: c.name.trim(), mobile: c.mobile.trim() }));
+
+    const legacyPermissions = validContacts
+      .filter(c => c.name !== '')
+      .map(c => c.mobile ? `${c.name} (${c.mobile})` : c.name);
+
     const newChild: ChildProfile = {
       ...(currentChild as ChildProfile),
-      collectionPermissions: currentChild.collectionPermissions?.filter(name => name.trim() !== '') || []
+      collectionContacts: validContacts,
+      collectionPermissions: legacyPermissions
     };
     
     if (editingChildIndex !== null) {
@@ -153,7 +191,12 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       swimDistance: '',
       medicalConsent: false,
       mediaConsent: false,
-      collectionPermissions: ['', '', '', '', ''],
+      collectionContacts: [
+        { name: '', mobile: '' },
+        { name: '', mobile: '' },
+        { name: '', mobile: '' }
+      ],
+      collectionPermissions: ['', '', ''],
       ethnicity: '',
       religion: '',
     });
@@ -714,12 +757,13 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                     />
                   </div>
                   <div>
-                    <InputLabel>Child's Mobile - Step Up & Seniors only</InputLabel>
+                    <InputLabel>Child's Mobile (Secondary aged only)</InputLabel>
                     <input 
                       type="tel"
                       className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
                       value={currentChild.ownMobile}
                       onChange={e => setCurrentChild({...currentChild, ownMobile: e.target.value})}
+                      placeholder="Optional"
                     />
                   </div>
                   <div>
@@ -834,22 +878,65 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                   </div>
 
                   <div className="space-y-4">
-                    <InputLabel>Adults permitted to collect this child (Up to 5 names)</InputLabel>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      {currentChild.collectionPermissions?.map((name, idx) => (
-                        <input 
-                          key={idx}
-                          type="text"
-                          placeholder={`Adult ${idx + 1}`}
-                          className="p-3 bg-gray-50 border-2 border-gray-100 rounded-xl outline-none text-sm font-bold"
-                          value={name}
-                          onChange={e => {
-                            const newPerms = [...(currentChild.collectionPermissions || [])];
-                            newPerms[idx] = e.target.value;
-                            setCurrentChild({...currentChild, collectionPermissions: newPerms});
-                          }}
-                        />
-                      ))}
+                    <div>
+                      <InputLabel>Adults Permitted to Collect Child & Emergency Mobiles (Up to 3 people)</InputLabel>
+                      <p className="text-xs text-slate-500 font-light mt-1">Please provide the full name and an emergency contact mobile number for up to 3 authorized adults.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {[0, 1, 2].map((idx) => {
+                        const contact = currentChild.collectionContacts?.[idx] || { name: '', mobile: '' };
+                        return (
+                          <div key={idx} className="p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl space-y-2.5">
+                            <span className="text-[10px] font-black text-brand-orange uppercase tracking-wider block">
+                              Authorized Adult {idx + 1}
+                            </span>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Full Name</label>
+                              <input 
+                                type="text"
+                                placeholder={`e.g. Grandma Sarah`}
+                                className="w-full p-2.5 bg-white border border-gray-200 rounded-xl outline-none text-xs font-bold focus:border-brand-orange"
+                                value={contact.name}
+                                onChange={e => {
+                                  const newContacts = [...(currentChild.collectionContacts || [
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' }
+                                  ])];
+                                  newContacts[idx] = { ...newContacts[idx], name: e.target.value };
+                                  setCurrentChild({
+                                    ...currentChild,
+                                    collectionContacts: newContacts,
+                                    collectionPermissions: newContacts.map(c => c.name)
+                                  });
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Emergency Mobile</label>
+                              <input 
+                                type="tel"
+                                placeholder="e.g. 07123 456789"
+                                className="w-full p-2.5 bg-white border border-gray-200 rounded-xl outline-none text-xs font-bold focus:border-brand-orange"
+                                value={contact.mobile}
+                                onChange={e => {
+                                  const newContacts = [...(currentChild.collectionContacts || [
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' }
+                                  ])];
+                                  newContacts[idx] = { ...newContacts[idx], mobile: e.target.value };
+                                  setCurrentChild({
+                                    ...currentChild,
+                                    collectionContacts: newContacts,
+                                    collectionPermissions: newContacts.map(c => c.name)
+                                  });
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -882,7 +969,12 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                         swimDistance: '',
                         medicalConsent: false,
                         mediaConsent: false,
-                        collectionPermissions: ['', '', '', '', ''],
+                        collectionContacts: [
+                          { name: '', mobile: '' },
+                          { name: '', mobile: '' },
+                          { name: '', mobile: '' }
+                        ],
+                        collectionPermissions: ['', '', ''],
                         ethnicity: '',
                         religion: '',
                       });

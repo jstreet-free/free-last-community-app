@@ -7,12 +7,17 @@ export interface FriendProfile {
   businessName?: string;
 }
 
+export interface AuthorizedCollector {
+  name: string;
+  mobile: string;
+}
+
 export interface ChildProfile {
   name: string;
   dob: string;
   age: number;
   address?: string; // if they don't live with person completing form
-  ownMobile?: string;
+  ownMobile?: string; // Secondary aged only
   ownEmail?: string;
   schoolCollege: string;
   dietaryAllergies: string;
@@ -22,7 +27,8 @@ export interface ChildProfile {
   swimDistance: string;
   medicalConsent: boolean; // emergency services permission
   mediaConsent: boolean; // photo/video consent
-  collectionPermissions: string[]; // up to 5 names
+  collectionPermissions?: string[]; // legacy list of names
+  collectionContacts?: AuthorizedCollector[]; // up to 3 authorized collectors with name and emergency contact mobile
   ethnicity?: string;
   religion?: string;
 }
