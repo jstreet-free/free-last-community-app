@@ -1295,7 +1295,7 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'home':
-        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       case 'friends':
         return <FriendsOf user={user} setActiveTab={setActiveTab} />;
       case 'videos':
@@ -1343,9 +1343,9 @@ const App: React.FC = () => {
       case 'partners':
         return <Partners assets={assets} partners={partners} impactStories={impactStories} />;
       case 'team':
-        return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       case 'wellbeing':
-        return user ? <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return user ? <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
@@ -1368,9 +1368,9 @@ const App: React.FC = () => {
             caseStudyRequests={caseStudyRequests}
             caseStudies={caseStudies}
           />
-        ) : <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        ) : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       default:
-        return <Home user={user} assets={assets} announcements={announcements} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
     }
   };
 

@@ -15,6 +15,7 @@ interface HomeProps {
   setActiveTab: (tab: string) => void;
   caseStudyRequests: CaseStudyRequest[];
   caseStudies: CaseStudy[];
+  onOpenProfileModal?: () => void;
 }
 
 export const Home: React.FC<HomeProps> = ({ 
@@ -23,7 +24,8 @@ export const Home: React.FC<HomeProps> = ({
   announcements, 
   setActiveTab,
   caseStudyRequests = [],
-  caseStudies = []
+  caseStudies = [],
+  onOpenProfileModal
 }) => {
   const [showInquiryModal, setShowInquiryModal] = useState(false);
   const [showAllNews, setShowAllNews] = useState(false);
@@ -236,15 +238,95 @@ export const Home: React.FC<HomeProps> = ({
               </div>
             </div>
             <button
-              onClick={() => {
-                // If user clicks, they can view their details or profile
-                const editBtn = document.querySelector('[title="Edit My Profile & Emergency Numbers"]') as HTMLButtonElement;
-                if (editBtn) editBtn.click();
-              }}
-              className="px-6 py-3 bg-white hover:bg-slate-100 text-brand-dark-blue rounded-xl font-bold text-xs brand-heading uppercase tracking-wider shadow-lg active:scale-95 transition-all shrink-0"
+              onClick={() => onOpenProfileModal?.()}
+              className="px-6 py-3 bg-white hover:bg-slate-100 text-brand-dark-blue rounded-xl font-bold text-xs brand-heading uppercase tracking-wider shadow-lg active:scale-95 transition-all shrink-0 flex items-center gap-2"
             >
-              Check My Details
+              <Icons.UserCheck className="w-4 h-4 text-brand-orange" /> Check / Edit My Details
             </button>
+          </div>
+        </section>
+      )}
+
+      {/* Member Profile & Emergency Hub Card for Logged-In Users */}
+      {user && (
+        <section className="bg-slate-50 py-10 px-4 sm:px-6 lg:px-8 border-b border-slate-200/80">
+          <div className="max-w-6xl mx-auto">
+            <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200/80 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div className="space-y-3 flex-1">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="px-3 py-1 bg-brand-orange/10 text-brand-orange font-bold text-[10px] brand-heading uppercase tracking-widest rounded-lg">
+                    Member Hub
+                  </span>
+                  <span className={`px-3 py-1 rounded-lg text-[10px] font-bold brand-heading uppercase tracking-widest ${
+                    user.status === 'approved' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {user.status === 'approved' ? 'Active & Approved' : 'Pending Home Visit'}
+                  </span>
+                </div>
+
+                <div>
+                  <h3 className="text-2xl font-bold text-brand-dark-blue brand-heading">
+                    Welcome back, {user.name || user.email.split('@')[0]}!
+                  </h3>
+                  <p className="text-xs text-slate-500 font-light mt-1">
+                    Keep your contact phone numbers, emergency details, medical conditions, and authorized collection contacts up to date.
+                  </p>
+                </div>
+
+                {/* Quick Info Badges */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-orange-100 text-brand-orange flex items-center justify-center shrink-0">
+                      <Icons.Phone className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 brand-heading">Primary Mobile</p>
+                      <p className="text-xs font-bold text-brand-dark-blue truncate">
+                        {user.profile?.parentMobile || user.profile?.mobileNumber || user.profile?.teenagerDetails?.teenagerMobile || 'Not set'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                      <Icons.MapPin className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 brand-heading">Address / Postcode</p>
+                      <p className="text-xs font-bold text-brand-dark-blue truncate">
+                        {user.profile?.postcode ? `${user.profile?.postcode} (${user.profile?.address || 'Set'})` : (user.profile?.address || 'Not set')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                      <Icons.Users className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 brand-heading">
+                        {user.profile?.registrationType === 'teenager' ? 'Teenager Profile' : 'Children / Youth'}
+                      </p>
+                      <p className="text-xs font-bold text-brand-dark-blue truncate">
+                        {user.profile?.registrationType === 'teenager' 
+                          ? (user.profile?.teenagerDetails?.name || 'Registered Teen') 
+                          : `${user.profile?.children?.length || 0} Registered Child${(user.profile?.children?.length || 0) === 1 ? '' : 'ren'}`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row lg:flex-col gap-3 w-full lg:w-auto shrink-0">
+                <button
+                  onClick={() => onOpenProfileModal?.()}
+                  style={{ backgroundColor: COLORS.orange }}
+                  className="px-6 py-3.5 text-white rounded-2xl font-bold text-xs brand-heading uppercase tracking-widest shadow-md hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
+                >
+                  <Icons.UserCheck className="w-4 h-4" /> Edit My Profile & Emergency Info
+                </button>
+              </div>
+            </div>
           </div>
         </section>
       )}

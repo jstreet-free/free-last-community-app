@@ -3377,6 +3377,35 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </div>
                   </div>
 
+                  {/* Other Adults Living in Household (if any) */}
+                  {selectedUserDetail.profile.otherAdults && selectedUserDetail.profile.otherAdults.length > 0 && (
+                    <div className="mb-6 bg-white/90 p-4 rounded-2xl border border-orange-100 shadow-sm space-y-2">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-brand-orange flex items-center gap-1.5">
+                        <Icons.UserCheck className="w-3.5 h-3.5" /> Other Adults Living in Household ({selectedUserDetail.profile.otherAdults.length})
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        {selectedUserDetail.profile.otherAdults.map((adult, aIdx) => (
+                          <div key={aIdx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-0.5">
+                            <span className="text-[8px] font-black uppercase tracking-wider text-brand-orange block">
+                              {adult.relationship || 'Household Adult'}
+                            </span>
+                            <p className="font-bold text-xs text-brand-dark-blue">{adult.name}</p>
+                            {adult.mobile && (
+                              <a href={`tel:${adult.mobile}`} className="text-[10px] font-mono text-slate-600 hover:text-brand-orange block">
+                                📞 {adult.mobile}
+                              </a>
+                            )}
+                            {adult.email && (
+                              <p className="text-[10px] font-mono text-slate-500 truncate">
+                                ✉️ {adult.email}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Children Safeguarding Breakdown (Authorized Collection Contacts 1, 2, 3 + Mobiles, Dietary, Medical) */}
                   {selectedUserDetail.profile.registrationType === 'family' && selectedUserDetail.profile.children && selectedUserDetail.profile.children.length > 0 && (
                     <div className="space-y-4">
@@ -3385,6 +3414,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       </p>
                       <div className="grid grid-cols-1 gap-4">
                         {selectedUserDetail.profile.children.map((child, cIdx) => {
+                          const isWalkHome = child.canWalkHome || child.walkHomeOrCollected === 'walk_home';
                           // Extract collection contacts
                           let contacts: AuthorizedCollector[] = child.collectionContacts || [];
                           if (contacts.length === 0 && child.collectionPermissions) {
@@ -3411,6 +3441,15 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                   <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
                                     Age: {child.age || 'N/A'} (DOB: {child.dob || 'N/A'})
                                   </span>
+                                  {isWalkHome ? (
+                                    <span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                      🚶 Walk Home Alone (Secondary)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-black bg-blue-100 text-blue-800 px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                      🚗 Adult Collection
+                                    </span>
+                                  )}
                                 </div>
                                 {child.ownMobile && (
                                   <div className="text-xs text-slate-500 font-medium">
@@ -3695,6 +3734,31 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       </p>
                     </div>
 
+                    {/* Other Adults in Household */}
+                    {selectedUserDetail.profile.otherAdults && selectedUserDetail.profile.otherAdults.length > 0 && (
+                      <div className="bg-slate-50 p-8 rounded-3xl space-y-4">
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Other Adults Living in the House ({selectedUserDetail.profile.otherAdults.length})
+                        </h3>
+                        <div className="space-y-3">
+                          {selectedUserDetail.profile.otherAdults.map((adult, aIdx) => (
+                            <div key={aIdx} className="bg-white p-4 rounded-2xl border border-slate-200">
+                              <div className="flex justify-between items-start mb-1">
+                                <span className="font-bold text-sm text-brand-dark-blue">{adult.name}</span>
+                                <span className="text-[9px] font-black uppercase tracking-wider bg-orange-100 text-brand-orange px-2 py-0.5 rounded">
+                                  {adult.relationship || 'Adult'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-600 space-y-0.5">
+                                {adult.mobile && <p>📞 {adult.mobile}</p>}
+                                {adult.email && <p>✉️ {adult.email}</p>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Consent Tracking */}
                     <div className="space-y-4">
                       <h3 style={{ color: COLORS.orange }} className="text-xs font-black brand-heading uppercase tracking-widest mb-6">Legal Consents</h3>
@@ -3721,38 +3785,54 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     
                     {selectedUserDetail.profile.registrationType === 'family' ? (
                       <div className="space-y-4">
-                        {selectedUserDetail.profile.children?.map((child, idx) => (
-                          <div key={idx} className="bg-white border-2 border-slate-100 p-8 rounded-[2rem] shadow-sm">
-                            <div className="flex justify-between items-center mb-6">
-                              <h4 className="text-xl font-bold brand-heading text-brand-dark-blue">{child.name}</h4>
-                              <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded text-slate-500 uppercase tracking-widest">Age: {child.age}</span>
-                            </div>
-                            <div className="space-y-4">
-                              {(child.ethnicity || child.religion) && (
-                                <div className="flex flex-wrap gap-2 pb-2">
-                                  {child.ethnicity && (
-                                    <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
-                                      Ethnicity: {child.ethnicity}
+                        {selectedUserDetail.profile.children?.map((child, idx) => {
+                          const isWalkHome = child.canWalkHome || child.walkHomeOrCollected === 'walk_home';
+                          return (
+                            <div key={idx} className="bg-white border-2 border-slate-100 p-8 rounded-[2rem] shadow-sm">
+                              <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
+                                <div>
+                                  <h4 className="text-xl font-bold brand-heading text-brand-dark-blue">{child.name}</h4>
+                                  <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded text-slate-500 uppercase tracking-widest inline-block mt-1">Age: {child.age}</span>
+                                </div>
+                                <div>
+                                  {isWalkHome ? (
+                                    <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-xl uppercase tracking-wider flex items-center gap-1">
+                                      🚶 Walk Home Alone (Secondary)
                                     </span>
-                                  )}
-                                  {child.religion && (
-                                    <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
-                                      Religion: {child.religion}
+                                  ) : (
+                                    <span className="text-[10px] font-black bg-blue-100 text-blue-800 px-3 py-1.5 rounded-xl uppercase tracking-wider flex items-center gap-1">
+                                      🚗 Adult Collection
                                     </span>
                                   )}
                                 </div>
-                              )}
-                              <div className="p-4 bg-orange-50 rounded-xl border border-orange-100">
-                                <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-1">Allergies / Dietary</p>
-                                <p className="text-xs font-medium text-brand-dark-blue italic">{child.dietaryAllergies || 'No specific requests listed'}</p>
                               </div>
-                              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-                                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Medical / Health</p>
-                                <p className="text-xs font-medium text-brand-dark-blue italic">{child.medicalConditions || 'No conditions declared'}</p>
+                              <div className="space-y-4">
+                                {(child.ethnicity || child.religion) && (
+                                  <div className="flex flex-wrap gap-2 pb-2">
+                                    {child.ethnicity && (
+                                      <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                        Ethnicity: {child.ethnicity}
+                                      </span>
+                                    )}
+                                    {child.religion && (
+                                      <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                        Religion: {child.religion}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="p-4 bg-orange-50 rounded-xl border border-orange-100">
+                                  <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-1">Allergies / Dietary</p>
+                                  <p className="text-xs font-medium text-brand-dark-blue italic">{child.dietaryAllergies || 'No specific requests listed'}</p>
+                                </div>
+                                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                                  <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Medical / Health</p>
+                                  <p className="text-xs font-medium text-brand-dark-blue italic">{child.medicalConditions || 'No conditions declared'}</p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       selectedUserDetail.profile.teenagerDetails && (

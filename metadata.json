@@ -1,5 +1,8 @@
 {
   "name": "free@last Community Hub",
-  "description": "A comprehensive community management platform for free@last, featuring volunteer session logging, activity booking, and a member wellbeing tracker with AI-powered support.",
-  "requestFramePermissions": []
+  "description": "A comprehensive community management platform for free@last, featuring volunteer session logging, activity booking, member profile editing with safeguarding, and a wellbeing tracker with AI-powered support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
