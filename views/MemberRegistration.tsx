@@ -14,7 +14,7 @@ type Step = 'type' | 'parent' | 'teenager' | 'children' | 'consent';
 
 export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, onComplete }) => {
   const [step, setStep] = useState<Step>(user.profile ? 'parent' : 'type');
-  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | null>(() => {
+  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | 'friend' | null>(() => {
     return user.profile?.registrationType || null;
   });
   
@@ -94,8 +94,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     swimDistance: user.profile?.teenagerDetails?.swimDistance || '',
     parentName: user.profile?.parentName || '',
     parentMobile: user.profile?.parentMobile || '',
-    medicalConsent: user.profile?.medicalConsent || false,
-    mediaConsent: user.profile?.mediaConsent || false,
+    medicalConsent: user.profile?.teenagerDetails?.medicalConsent || false,
+    mediaConsent: user.profile?.teenagerDetails?.mediaConsent || false,
     ethnicity: user.profile?.teenagerDetails?.ethnicity || '',
     religion: user.profile?.teenagerDetails?.religion || '',
   });

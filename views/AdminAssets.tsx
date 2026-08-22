@@ -6,6 +6,7 @@ import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
 import { AdminNeedsManager } from '../components/AdminNeedsManager';
+import { ImageWithFallback } from '../components/ImageWithFallback';
 
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
@@ -1059,7 +1060,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   };
 
   const isMemberUser = (u: User) => {
-    return (u.role === 'member' || !u.role) && !isFriendUser(u) && u.role !== 'team' && u.role !== 'admin';
+    return (u.role === 'member' || !u.role) && !isFriendUser(u);
   };
 
   const subTabFilteredUsers = filteredUsers.filter(u => {
@@ -1932,7 +1933,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             {Object.keys(assets).map((key) => (
               <div key={key} className="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm group hover:shadow-xl transition-all">
                 <div className="h-48 relative overflow-hidden bg-slate-100">
-                  <img 
+                  <ImageWithFallback
                     src={assets[key]} 
                     alt={key} 
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -2118,7 +2119,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {partners.map((partner) => (
                 <div key={partner.id} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-6 group hover:shadow-md transition-all">
-                  <img 
+                  <ImageWithFallback
                     src={partner.logo} 
                     alt="" 
                     className="w-20 h-20 object-cover rounded-2xl border border-gray-100" 
@@ -2259,7 +2260,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               {impactStories.map((story) => (
                 <div key={story.id} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col group hover:shadow-md transition-all">
                   <div className="flex items-center gap-6 mb-4">
-                    <img 
+                    <ImageWithFallback
                       src={story.image || "https://picsum.photos/seed/impact/200/200"} 
                       alt="" 
                       className="w-20 h-20 object-cover rounded-2xl border border-gray-100" 
@@ -2837,7 +2838,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     <div className="flex flex-col md:flex-row items-start gap-4">
                       {(editingAlbum?.imageUrl || newAlbum?.imageUrl) && (
                         <div className="w-24 h-24 rounded-2xl overflow-hidden shadow-sm border border-gray-100 bg-white shrink-0">
-                          <img 
+                          <ImageWithFallback
                             src={editingAlbum ? editingAlbum.imageUrl : newAlbum.imageUrl} 
                             alt="Preview" 
                             className="w-full h-full object-cover"
@@ -2905,7 +2906,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                   }`}
                                   title={assetLabels[key] || key}
                                 >
-                                  <img src={url as string} className="w-full h-full object-cover" />
+                                  <ImageWithFallback src={url as string} className="w-full h-full object-cover" />
                                 </button>
                               ))}
                             </div>
@@ -2943,7 +2944,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   <div key={album.id} className="bg-white p-8 rounded-[2rem] border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6 group hover:shadow-xl transition-all">
                     <div className="flex items-center gap-6">
                       <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300 overflow-hidden shrink-0">
-                        {album.imageUrl ? <img src={album.imageUrl} className="w-full h-full object-cover" /> : <Icons.Camera />}
+                        {album.imageUrl ? <ImageWithFallback src={album.imageUrl} className="w-full h-full object-cover" /> : <Icons.Camera />}
                       </div>
                       <div>
                         <div className="flex items-center gap-2 mb-1">
@@ -3118,7 +3119,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Session Image (Optional)</label>
                     <div className="flex items-center gap-4">
                       {(editingActivity?.imageUrl || newActivity?.imageUrl) && (
-                        <img 
+                        <ImageWithFallback
                           src={editingActivity ? editingActivity.imageUrl : newActivity.imageUrl} 
                           alt="Preview" 
                           className="w-16 h-16 object-cover rounded-xl shadow-sm border border-gray-100"
@@ -3180,7 +3181,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               {activities.map((act) => (
                 <div key={act.id} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 group hover:shadow-md transition-all">
                   {act.imageUrl && (
-                    <img 
+                    <ImageWithFallback
                       src={act.imageUrl} 
                       alt="" 
                       className="w-24 h-24 object-cover rounded-2xl hidden md:block border border-gray-100" 
@@ -3767,12 +3768,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                           <div className={`w-3 h-3 rounded-full ${selectedUserDetail.profile.dataConsent ? 'bg-green-500' : 'bg-red-500'}`}></div>
                           <span className="font-bold text-[10px] brand-heading uppercase tracking-widest">Data Processing</span>
                         </div>
-                        <div className={`px-6 py-4 rounded-2xl flex items-center gap-3 ${selectedUserDetail.profile.mediaConsent ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                          <div className={`w-3 h-3 rounded-full ${selectedUserDetail.profile.mediaConsent ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                        <div className={`px-6 py-4 rounded-2xl flex items-center gap-3 ${selectedUserDetail.profile.teenagerDetails?.mediaConsent ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                          <div className={`w-3 h-3 rounded-full ${selectedUserDetail.profile.teenagerDetails?.mediaConsent ? 'bg-green-500' : 'bg-red-500'}`}></div>
                           <span className="font-bold text-[10px] brand-heading uppercase tracking-widest">Media/Photos</span>
                         </div>
-                        <div className={`px-6 py-4 rounded-2xl flex items-center gap-3 ${selectedUserDetail.profile.medicalConsent ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                          <div className={`w-3 h-3 rounded-full ${selectedUserDetail.profile.medicalConsent ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                        <div className={`px-6 py-4 rounded-2xl flex items-center gap-3 ${selectedUserDetail.profile.teenagerDetails?.medicalConsent ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                          <div className={`w-3 h-3 rounded-full ${selectedUserDetail.profile.teenagerDetails?.medicalConsent ? 'bg-green-500' : 'bg-red-500'}`}></div>
                           <span className="font-bold text-[10px] brand-heading uppercase tracking-widest">First Aid/Medical</span>
                         </div>
                       </div>
@@ -3860,7 +3861,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               </div>
                               <div className="p-4 bg-slate-50 rounded-xl">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Mobile</p>
-                                <p className="text-sm font-bold text-brand-dark-blue">{selectedUserDetail.profile.teenagerDetails.teenagerMobile || 'N/A'}</p>
+                                <p className="text-sm font-bold text-brand-dark-blue">{selectedUserDetail.profile.teenagerDetails.ownMobile || 'N/A'}</p>
                               </div>
                             </div>
                             <div className="p-6 bg-orange-50 rounded-2xl border border-orange-100">

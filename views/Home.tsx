@@ -7,6 +7,7 @@ import { db } from '../services/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
 import { analyzeCaseStudy } from '../services/geminiService';
+import { ImageWithFallback } from '../components/ImageWithFallback';
 
 interface HomeProps {
   user: User | null;
@@ -187,7 +188,7 @@ export const Home: React.FC<HomeProps> = ({
       {/* Hero Section */}
       <section className="relative min-h-[85vh] flex items-center justify-center text-center px-4 overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <img 
+          <ImageWithFallback
             src={assets.YOUTH_HOODIES} 
             alt="free@last youth team" 
             className="w-full h-full object-cover filter brightness-[0.35] scale-105"
@@ -371,7 +372,7 @@ export const Home: React.FC<HomeProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
           <div className="relative group">
             <div style={{ backgroundColor: COLORS.green }} className="absolute -inset-4 opacity-10 rounded-3xl blur-2xl"></div>
-            <img 
+            <ImageWithFallback
               src={assets.MUDDY_ADVENTURE} 
               alt="Adventure" 
               className="rounded-3xl shadow-2xl relative border-[8px] border-white w-full object-cover aspect-[4/3]"
@@ -508,7 +509,7 @@ export const Home: React.FC<HomeProps> = ({
             </div>
           </div>
           <div className="order-1 md:order-2">
-            <img 
+            <ImageWithFallback
               src={assets.PLAYGROUND} 
               alt="Playground" 
               className="rounded-3xl shadow-2xl border-[8px] border-white w-full object-cover aspect-[4/5]"

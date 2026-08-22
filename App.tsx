@@ -232,7 +232,7 @@ const App: React.FC = () => {
   // Sync assets from Firestore
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'assets'), (snapshot) => {
-      const newAssets = { ...DEFAULT_IMAGES };
+      const newAssets: Record<string, string> = { ...DEFAULT_IMAGES };
       snapshot.forEach((doc) => {
         newAssets[doc.id] = doc.data().value;
       });
@@ -1343,7 +1343,7 @@ const App: React.FC = () => {
       case 'partners':
         return <Partners assets={assets} partners={partners} impactStories={impactStories} />;
       case 'team':
-        return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
+        return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'wellbeing':
         return user ? <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       case 'assets':
@@ -1368,9 +1368,9 @@ const App: React.FC = () => {
             caseStudyRequests={caseStudyRequests}
             caseStudies={caseStudies}
           />
-        ) : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
+        ) : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       default:
-        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
+        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
     }
   };
 
