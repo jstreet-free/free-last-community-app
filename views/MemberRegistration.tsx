@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, MemberProfile, ChildProfile } from '../types';
+import { User, MemberProfile, ChildProfile, HouseholdAdult } from '../types';
 import { Icons, COLORS } from '../constants';
 import { db } from '../services/firebase';
 import { collection, addDoc } from 'firebase/firestore';
@@ -33,6 +33,52 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     religion: user.profile?.religion || '',
   });
 
+  // Other Adults in Household
+  const [otherAdults, setOtherAdults] = useState<HouseholdAdult[]>(() => {
+    return user.profile?.otherAdults || user.profile?.householdAdults || [];
+  });
+  const [currentAdult, setCurrentAdult] = useState<HouseholdAdult>({
+    name: '',
+    relationship: 'Partner / Spouse',
+    mobile: '',
+    email: '',
+  });
+  const [editingAdultIndex, setEditingAdultIndex] = useState<number | null>(null);
+  const [isAddingAdultFormOpen, setIsAddingAdultFormOpen] = useState(false);
+
+  const handleSaveAdult = () => {
+    if (!currentAdult.name.trim()) {
+      setError("Please enter the adult's full name.");
+      return;
+    }
+    if (editingAdultIndex !== null) {
+      const updated = [...otherAdults];
+      updated[editingAdultIndex] = currentAdult;
+      setOtherAdults(updated);
+      setEditingAdultIndex(null);
+    } else {
+      setOtherAdults([...otherAdults, currentAdult]);
+    }
+    setCurrentAdult({
+      name: '',
+      relationship: 'Partner / Spouse',
+      mobile: '',
+      email: '',
+    });
+    setIsAddingAdultFormOpen(false);
+    setError(null);
+  };
+
+  const handleStartEditAdult = (idx: number) => {
+    setCurrentAdult(otherAdults[idx]);
+    setEditingAdultIndex(idx);
+    setIsAddingAdultFormOpen(true);
+  };
+
+  const handleRemoveAdult = (idx: number) => {
+    setOtherAdults(otherAdults.filter((_, i) => i !== idx));
+  };
+
   // Teenager Info
   const [teenagerInfo, setTeenagerInfo] = useState({
     name: user.profile?.teenagerDetails?.name || user.name || '',
@@ -54,6 +100,28 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     religion: user.profile?.teenagerDetails?.religion || '',
   });
 
+  const getInitialCollectionContacts = (child?: Partial<ChildProfile>) => {
+    if (child?.collectionContacts && child.collectionContacts.length > 0) {
+      return [
+        child.collectionContacts[0] || { name: '', mobile: '' },
+        child.collectionContacts[1] || { name: '', mobile: '' },
+        child.collectionContacts[2] || { name: '', mobile: '' },
+      ];
+    }
+    if (child?.collectionPermissions && child.collectionPermissions.length > 0) {
+      return [
+        { name: child.collectionPermissions[0] || '', mobile: '' },
+        { name: child.collectionPermissions[1] || '', mobile: '' },
+        { name: child.collectionPermissions[2] || '', mobile: '' },
+      ];
+    }
+    return [
+      { name: '', mobile: '' },
+      { name: '', mobile: '' },
+      { name: '', mobile: '' },
+    ];
+  };
+
   // Children Info (for Family mode)
   const [children, setChildren] = useState<ChildProfile[]>(() => {
     return user.profile?.children || [];
@@ -73,7 +141,14 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     swimDistance: '',
     medicalConsent: false,
     mediaConsent: false,
-    collectionPermissions: ['', '', '', '', ''],
+    canWalkHome: false,
+    walkHomeOrCollected: 'collected',
+    collectionContacts: [
+      { name: '', mobile: '' },
+      { name: '', mobile: '' },
+      { name: '', mobile: '' }
+    ],
+    collectionPermissions: ['', '', ''],
     ethnicity: '',
     religion: '',
   });
@@ -82,9 +157,13 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
 
   const startEditChild = (index: number) => {
     const childToEdit = children[index];
+    const contacts = getInitialCollectionContacts(childToEdit);
     setCurrentChild({
       ...childToEdit,
-      collectionPermissions: childToEdit.collectionPermissions ? [...childToEdit.collectionPermissions, '', '', '', '', ''].slice(0, 5) : ['', '', '', '', '']
+      canWalkHome: childToEdit.canWalkHome || childToEdit.walkHomeOrCollected === 'walk_home' || false,
+      walkHomeOrCollected: childToEdit.walkHomeOrCollected || (childToEdit.canWalkHome ? 'walk_home' : 'collected'),
+      collectionContacts: contacts,
+      collectionPermissions: contacts.map(c => c.name)
     });
     setEditingChildIndex(index);
   };
@@ -124,9 +203,20 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       return;
     }
     
+    const validContacts = (currentChild.collectionContacts || [])
+      .filter(c => c.name.trim() !== '' || c.mobile.trim() !== '')
+      .map(c => ({ name: c.name.trim(), mobile: c.mobile.trim() }));
+
+    const legacyPermissions = validContacts
+      .filter(c => c.name !== '')
+      .map(c => c.mobile ? `${c.name} (${c.mobile})` : c.name);
+
     const newChild: ChildProfile = {
       ...(currentChild as ChildProfile),
-      collectionPermissions: currentChild.collectionPermissions?.filter(name => name.trim() !== '') || []
+      canWalkHome: currentChild.canWalkHome || currentChild.walkHomeOrCollected === 'walk_home' || false,
+      walkHomeOrCollected: currentChild.canWalkHome || currentChild.walkHomeOrCollected === 'walk_home' ? 'walk_home' : 'collected',
+      collectionContacts: validContacts,
+      collectionPermissions: legacyPermissions
     };
     
     if (editingChildIndex !== null) {
@@ -153,7 +243,14 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       swimDistance: '',
       medicalConsent: false,
       mediaConsent: false,
-      collectionPermissions: ['', '', '', '', ''],
+      canWalkHome: false,
+      walkHomeOrCollected: 'collected',
+      collectionContacts: [
+        { name: '', mobile: '' },
+        { name: '', mobile: '' },
+        { name: '', mobile: '' }
+      ],
+      collectionPermissions: ['', '', ''],
       ethnicity: '',
       religion: '',
     });
@@ -264,6 +361,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         livingWith: parentInfo.livingWith,
         ethnicity: parentInfo.ethnicity,
         religion: parentInfo.religion,
+        otherAdults,
+        householdAdults: otherAdults,
         teenagerDetails: teenagerInfo,
         dataConsent
       });
@@ -283,6 +382,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         livingWith: parentInfo.livingWith,
         ethnicity: parentInfo.ethnicity,
         religion: parentInfo.religion,
+        otherAdults,
+        householdAdults: otherAdults,
         children,
         dataConsent
       });
@@ -429,6 +530,155 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                 />
               </div>
             </div>
+
+            {/* Other Adults Living in Household Section */}
+            <div className="pt-6 border-t border-gray-100 space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h4 className="text-lg font-bold brand-heading uppercase tracking-widest text-brand-dark-blue flex items-center gap-2">
+                    <Icons.User className="w-5 h-5 text-brand-orange" />
+                    Other Adults Living in the House ({otherAdults.length})
+                  </h4>
+                  <p className="text-xs text-gray-500 font-light mt-0.5">
+                    Record any additional adults living in the household (e.g. partner, spouse, grandparents, older siblings 18+).
+                  </p>
+                </div>
+                {!isAddingAdultFormOpen && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentAdult({
+                        name: '',
+                        relationship: 'Partner / Spouse',
+                        mobile: '',
+                        email: '',
+                      });
+                      setEditingAdultIndex(null);
+                      setIsAddingAdultFormOpen(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-brand-orange text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                  >
+                    <Icons.Plus className="w-4 h-4" />
+                    Add Adult
+                  </button>
+                )}
+              </div>
+
+              {/* List of Added Adults */}
+              {otherAdults.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {otherAdults.map((adult, idx) => (
+                    <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-start justify-between">
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-brand-orange block">
+                          {adult.relationship || 'Household Adult'}
+                        </span>
+                        <h5 className="font-bold text-sm text-brand-dark-blue brand-heading">{adult.name}</h5>
+                        <div className="text-xs text-slate-500 font-mono mt-1 space-y-0.5">
+                          {adult.mobile && <p>📞 {adult.mobile}</p>}
+                          {adult.email && <p>✉️ {adult.email}</p>}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditAdult(idx)}
+                          className="px-2.5 py-1.5 bg-white border border-slate-200 hover:border-brand-orange text-slate-700 rounded-lg text-[9px] font-bold uppercase tracking-wider"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAdult(idx)}
+                          className="px-2.5 py-1.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-500 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Inline Add/Edit Adult Form */}
+              {isAddingAdultFormOpen && (
+                <div className="p-6 bg-white border-2 border-dashed border-brand-orange/40 rounded-3xl space-y-4">
+                  <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                    <h5 className="text-sm font-bold brand-heading uppercase tracking-wider text-brand-orange">
+                      {editingAdultIndex !== null ? `Edit Adult: ${currentAdult.name}` : 'Add Other Adult Living in Household'}
+                    </h5>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingAdultFormOpen(false)}
+                      className="text-xs text-gray-400 hover:text-gray-600 font-bold uppercase"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <InputLabel>Adult's Full Name *</InputLabel>
+                      <input
+                        type="text"
+                        placeholder="e.g. Jane Smith"
+                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                        value={currentAdult.name}
+                        onChange={e => setCurrentAdult({ ...currentAdult, name: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <InputLabel>Relationship / Role</InputLabel>
+                      <input
+                        type="text"
+                        placeholder="e.g. Partner, Grandparent, Aunt, Sibling 18+"
+                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                        value={currentAdult.relationship}
+                        onChange={e => setCurrentAdult({ ...currentAdult, relationship: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <InputLabel>Mobile Number (Optional)</InputLabel>
+                      <input
+                        type="tel"
+                        placeholder="e.g. 07123 456789"
+                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                        value={currentAdult.mobile || ''}
+                        onChange={e => setCurrentAdult({ ...currentAdult, mobile: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <InputLabel>Email Address (Optional)</InputLabel>
+                      <input
+                        type="email"
+                        placeholder="e.g. jane@example.com"
+                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                        value={currentAdult.email || ''}
+                        onChange={e => setCurrentAdult({ ...currentAdult, email: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingAdultFormOpen(false)}
+                      className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-xs font-bold uppercase"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveAdult}
+                      className="px-6 py-2 bg-brand-orange text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110"
+                    >
+                      {editingAdultIndex !== null ? 'Save Changes' : 'Save Adult'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-between pt-8">
               <button type="button" onClick={() => setStep('type')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
               <button 
@@ -643,30 +893,52 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
               {/* List of added children */}
               {children.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-12">
-                  {children.map((child, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100">
-                      <div>
-                        <h4 className="font-bold text-brand-dark-blue brand-heading uppercase">{child.name}</h4>
-                        <p className="text-xs text-gray-400">Age: {child.age} • {child.schoolCollege}</p>
+                  {children.map((child, idx) => {
+                    const isWalkHome = child.canWalkHome || child.walkHomeOrCollected === 'walk_home';
+                    return (
+                      <div key={idx} className="p-6 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col justify-between gap-4">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="font-bold text-brand-dark-blue brand-heading uppercase">{child.name}</h4>
+                            <p className="text-xs text-gray-400 font-medium">Age: {child.age} • {child.schoolCollege || 'School not specified'}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              type="button" 
+                              onClick={() => startEditChild(idx)}
+                              className="px-3 py-1.5 bg-brand-orange text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 transition-all font-sans"
+                            >
+                              Edit
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => handleRemoveChild(idx)}
+                              className="px-3 py-1.5 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all font-sans"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200/60 text-[10px]">
+                          {isWalkHome ? (
+                            <span className="px-2.5 py-1 bg-emerald-100/70 text-emerald-800 rounded-lg font-bold flex items-center gap-1">
+                              🚶 Can walk home alone (Secondary aged)
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-blue-100/70 text-blue-800 rounded-lg font-bold flex items-center gap-1">
+                              🚗 Will be collected by authorized adult
+                            </span>
+                          )}
+                          {child.collectionContacts && child.collectionContacts.some(c => c.name) && (
+                            <span className="px-2.5 py-1 bg-slate-200/70 text-slate-700 rounded-lg font-medium">
+                              👥 {child.collectionContacts.filter(c => c.name).length} collectors listed
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button 
-                          type="button" 
-                          onClick={() => startEditChild(idx)}
-                          className="px-3 py-1.5 bg-brand-orange text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 transition-all font-sans"
-                        >
-                          Edit
-                        </button>
-                        <button 
-                          type="button" 
-                          onClick={() => handleRemoveChild(idx)}
-                          className="px-3 py-1.5 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all font-sans"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -714,12 +986,13 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                     />
                   </div>
                   <div>
-                    <InputLabel>Child's Mobile - Step Up & Seniors only</InputLabel>
+                    <InputLabel>Child's Mobile (Secondary aged only)</InputLabel>
                     <input 
                       type="tel"
                       className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold"
                       value={currentChild.ownMobile}
                       onChange={e => setCurrentChild({...currentChild, ownMobile: e.target.value})}
+                      placeholder="Optional"
                     />
                   </div>
                   <div>
@@ -833,23 +1106,100 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                     </label>
                   </div>
 
+                  {/* Secondary Aged Walk Home Checkbox */}
+                  <div className="p-5 bg-orange-50/70 border-2 border-brand-orange/30 rounded-2xl space-y-2">
+                    <label className="flex items-start gap-3.5 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        id="canWalkHomeRegCheckbox"
+                        className="mt-1 w-5 h-5 accent-brand-orange cursor-pointer shrink-0"
+                        checked={currentChild.canWalkHome || currentChild.walkHomeOrCollected === 'walk_home' || false}
+                        onChange={e => {
+                          const checked = e.target.checked;
+                          setCurrentChild({
+                            ...currentChild,
+                            canWalkHome: checked,
+                            walkHomeOrCollected: checked ? 'walk_home' : 'collected'
+                          });
+                        }}
+                      />
+                      <div>
+                        <span className="text-sm font-bold text-brand-dark-blue brand-heading block">
+                          Can your secondary aged child walk home or will they be collected?
+                        </span>
+                        <span className="text-xs text-slate-600 font-light block mt-0.5 leading-relaxed">
+                          Check this box if your secondary aged child (11+) has permission to walk home alone after centre sessions. If unchecked, an authorized adult must collect them.
+                        </span>
+                      </div>
+                    </label>
+                    {(currentChild.canWalkHome || currentChild.walkHomeOrCollected === 'walk_home') && (
+                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                        <Icons.Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        Child is permitted to walk home alone (Secondary aged). You may still specify authorized adults below in case collection is needed.
+                      </div>
+                    )}
+                  </div>
+
                   <div className="space-y-4">
-                    <InputLabel>Adults permitted to collect this child (Up to 5 names)</InputLabel>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      {currentChild.collectionPermissions?.map((name, idx) => (
-                        <input 
-                          key={idx}
-                          type="text"
-                          placeholder={`Adult ${idx + 1}`}
-                          className="p-3 bg-gray-50 border-2 border-gray-100 rounded-xl outline-none text-sm font-bold"
-                          value={name}
-                          onChange={e => {
-                            const newPerms = [...(currentChild.collectionPermissions || [])];
-                            newPerms[idx] = e.target.value;
-                            setCurrentChild({...currentChild, collectionPermissions: newPerms});
-                          }}
-                        />
-                      ))}
+                    <div>
+                      <InputLabel>Adults Permitted to Collect Child & Emergency Mobiles (Up to 3 people)</InputLabel>
+                      <p className="text-xs text-slate-500 font-light mt-1">Please provide the full name and an emergency contact mobile number for up to 3 authorized adults.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {[0, 1, 2].map((idx) => {
+                        const contact = currentChild.collectionContacts?.[idx] || { name: '', mobile: '' };
+                        return (
+                          <div key={idx} className="p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl space-y-2.5">
+                            <span className="text-[10px] font-black text-brand-orange uppercase tracking-wider block">
+                              Authorized Adult {idx + 1}
+                            </span>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Full Name</label>
+                              <input 
+                                type="text"
+                                placeholder={`e.g. Grandma Sarah`}
+                                className="w-full p-2.5 bg-white border border-gray-200 rounded-xl outline-none text-xs font-bold focus:border-brand-orange"
+                                value={contact.name}
+                                onChange={e => {
+                                  const newContacts = [...(currentChild.collectionContacts || [
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' }
+                                  ])];
+                                  newContacts[idx] = { ...newContacts[idx], name: e.target.value };
+                                  setCurrentChild({
+                                    ...currentChild,
+                                    collectionContacts: newContacts,
+                                    collectionPermissions: newContacts.map(c => c.name)
+                                  });
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Emergency Mobile</label>
+                              <input 
+                                type="tel"
+                                placeholder="e.g. 07123 456789"
+                                className="w-full p-2.5 bg-white border border-gray-200 rounded-xl outline-none text-xs font-bold focus:border-brand-orange"
+                                value={contact.mobile}
+                                onChange={e => {
+                                  const newContacts = [...(currentChild.collectionContacts || [
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' },
+                                    { name: '', mobile: '' }
+                                  ])];
+                                  newContacts[idx] = { ...newContacts[idx], mobile: e.target.value };
+                                  setCurrentChild({
+                                    ...currentChild,
+                                    collectionContacts: newContacts,
+                                    collectionPermissions: newContacts.map(c => c.name)
+                                  });
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -882,7 +1232,12 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
                         swimDistance: '',
                         medicalConsent: false,
                         mediaConsent: false,
-                        collectionPermissions: ['', '', '', '', ''],
+                        collectionContacts: [
+                          { name: '', mobile: '' },
+                          { name: '', mobile: '' },
+                          { name: '', mobile: '' }
+                        ],
+                        collectionPermissions: ['', '', ''],
                         ethnicity: '',
                         religion: '',
                       });

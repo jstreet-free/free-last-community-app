@@ -1,5 +1,6 @@
 
 import React from 'react';
+import * as LucideIcons from 'lucide-react';
 import { Activity, Announcement, Partner, ImpactStory } from './types';
 
 export const COLORS = {

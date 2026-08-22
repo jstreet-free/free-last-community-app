@@ -14,6 +14,8 @@ import { FriendsOf } from './views/FriendsOf';
 import { Videos } from './views/Videos';
 import { PhotoPolicyModal } from './components/PhotoPolicyModal';
 import { MemberSupportWidget } from './components/MemberSupportWidget';
+import { MemberProfileEditor } from './components/MemberProfileEditor';
+import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
 import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
@@ -147,6 +149,7 @@ const App: React.FC = () => {
 
   const [bookings, setBookings] = useState<string[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [hasConfirmedPhotoPolicy, setHasConfirmedPhotoPolicy] = useState(() => {
     return localStorage.getItem('freeatlast_photo_policy_confirmed') === 'true';
   });
@@ -789,10 +792,10 @@ const App: React.FC = () => {
             ? (profile.parentName || profile.familyName) 
             : (profile.registrationType === 'teenager' ? profile.teenagerDetails?.name : profile.parentName));
 
-      // Preserve status if already approved
-      const newStatus = user.status === 'approved' ? 'approved' : (isTeam ? 'pending' : 'approved');
+      // Members require home visit approval before accessing bookings and photos
       const isFriend = profile.isFriendSignup || false;
       const finalRole = isFriend ? 'friend' : user.role;
+      const newStatus = (user.role === 'admin' || user.status === 'approved') ? 'approved' : (isFriend ? 'approved' : 'pending');
 
       await updateDoc(userRef, {
         name,
@@ -804,8 +807,12 @@ const App: React.FC = () => {
 
       setUser({ ...user, name, profile, profileComplete: true, status: newStatus, role: finalRole });
       setActiveTab('home');
-      setNotification(isFriend ? "Friend registration successful! Welcome to the hub." : "Registration successful! Welcome to the hub.");
-      setTimeout(() => setNotification(null), 5000);
+      setNotification(
+        isFriend 
+          ? "Friend registration successful! Welcome to the hub." 
+          : "Registration saved! As part of our community safeguarding policy, our team will arrange a brief home visit to approve your account for activity bookings and photos."
+      );
+      setTimeout(() => setNotification(null), 6500);
     } catch (error) {
       console.error("Registration finalization error:", error);
       setNotification("Failed to save your profile. Please try again.");
@@ -1288,12 +1295,22 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'home':
-        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       case 'friends':
         return <FriendsOf user={user} setActiveTab={setActiveTab} />;
       case 'videos':
         return <Videos user={user} />;
       case 'activities':
+        if (user?.role === 'member' && user?.status !== 'approved') {
+          return (
+            <PendingMemberHomeVisitNotice 
+              user={user} 
+              onOpenProfile={() => setShowProfileEditor(true)} 
+              setActiveTab={setActiveTab} 
+              feature="activity bookings" 
+            />
+          );
+        }
         return <Activities 
           user={user} 
           onBook={handleBookActivity} 
@@ -1306,6 +1323,16 @@ const App: React.FC = () => {
           setActiveTab={setActiveTab}
         />;
       case 'gallery':
+        if (user?.role === 'member' && user?.status !== 'approved') {
+          return (
+            <PendingMemberHomeVisitNotice 
+              user={user} 
+              onOpenProfile={() => setShowProfileEditor(true)} 
+              setActiveTab={setActiveTab} 
+              feature="the photo gallery" 
+            />
+          );
+        }
         return <Gallery 
           user={user} 
           assets={assets} 
@@ -1318,7 +1345,7 @@ const App: React.FC = () => {
       case 'team':
         return ((user?.role === 'team' && user?.status === 'approved') || user?.role === 'admin') ? <VolunteerLogView user={user} logs={teamLogs} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       case 'wellbeing':
-        return user ? <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
+        return user ? <MemberWellbeing user={user} logs={wellbeingLogs} allUsers={allUsers} /> : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} onOpenProfileModal={() => setShowProfileEditor(true)} />;
       case 'assets':
         return user?.role === 'admin' ? (
           <AdminAssets 
@@ -1353,6 +1380,7 @@ const App: React.FC = () => {
       onLogout={handleLogout} 
       activeTab={activeTab} 
       setActiveTab={setActiveTab}
+      onOpenProfileModal={() => setShowProfileEditor(true)}
     >
       {notification && (
         <div className="fixed top-24 right-8 z-[100] animate-slideIn">
@@ -1371,6 +1399,18 @@ const App: React.FC = () => {
       )}
       {renderContent()}
       <MemberSupportWidget user={user} inquiries={inquiries} />
+      {showProfileEditor && user && (
+        <MemberProfileEditor 
+          user={user} 
+          onClose={() => setShowProfileEditor(false)} 
+          onUpdateUser={(updatedUser) => {
+            setUser(updatedUser);
+            localStorage.setItem('freeatlast_v2_user', JSON.stringify(updatedUser));
+            setNotification("Profile details updated successfully!");
+            setTimeout(() => setNotification(null), 4000);
+          }}
+        />
+      )}
     </Layout>
   );
 };

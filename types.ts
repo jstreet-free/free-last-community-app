@@ -7,12 +7,28 @@ export interface FriendProfile {
   businessName?: string;
 }
 
+export interface AuthorizedCollector {
+  name: string;
+  mobile: string;
+}
+
+export interface HouseholdAdult {
+  name: string;
+  relationship: string; // e.g. Partner, Spouse, Grandparent, Aunt / Uncle, Older Sibling (18+), Other Adult
+  mobile?: string;
+  email?: string;
+  ethnicity?: string;
+  religion?: string;
+  dietaryAllergies?: string;
+  medicalConditions?: string;
+}
+
 export interface ChildProfile {
   name: string;
   dob: string;
   age: number;
   address?: string; // if they don't live with person completing form
-  ownMobile?: string;
+  ownMobile?: string; // Secondary aged only
   ownEmail?: string;
   schoolCollege: string;
   dietaryAllergies: string;
@@ -22,41 +38,63 @@ export interface ChildProfile {
   swimDistance: string;
   medicalConsent: boolean; // emergency services permission
   mediaConsent: boolean; // photo/video consent
-  collectionPermissions: string[]; // up to 5 names
+  canWalkHome?: boolean; // Secondary aged child walk home alone permission
+  walkHomeOrCollected?: 'walk_home' | 'collected'; // 'can your secondary aged child walk home or will they be collected?'
+  collectionPermissions?: string[]; // legacy list of names
+  collectionContacts?: AuthorizedCollector[]; // up to 3 authorized collectors with name and emergency contact mobile
   ethnicity?: string;
   religion?: string;
 }
 
 export interface MemberProfile {
-  registrationType: 'family' | 'teenager' | 'friend';
-  parentName: string;
+  registrationType?: 'family' | 'teenager' | 'friend' | 'individual';
+  parentName?: string;
   familyName?: string; // for family
-  address: string;
+  address?: string;
   postcode?: string;
   isFriendSignup?: boolean;
-  parentEmail: string;
-  parentMobile: string;
-  livingWith: string;
+  parentEmail?: string;
+  parentMobile?: string;
+  livingWith?: string;
   ethnicity?: string;
   religion?: string;
   
+  // Direct member contact info
+  mobileNumber?: string;
+  emergencyContactName?: string;
+  emergencyContactMobile?: string;
+  emergencyRelationship?: string;
+  dietaryAllergies?: string;
+  medicalConditions?: string;
+  medication?: string;
+  medicalConsent?: boolean;
+  mediaConsent?: boolean;
+  canSwim?: boolean;
+  swimDistance?: string;
+
+  // Other adults living in the house
+  otherAdults?: HouseholdAdult[];
+  householdAdults?: HouseholdAdult[];
+
   // For Teenager mode
   teenagerDetails?: {
-    name: string;
-    dob: string;
-    age: number;
-    ownMobile: string;
-    ownEmail: string;
-    schoolCollege: string;
-    dietaryAllergies: string;
-    medicalConditions: string;
-    medication: string;
-    canSwim: boolean;
-    swimDistance: string;
+    name?: string;
+    dob?: string;
+    age?: number;
+    ownMobile?: string;
+    teenagerMobile?: string;
+    ownEmail?: string;
+    teenagerEmail?: string;
+    schoolCollege?: string;
+    dietaryAllergies?: string;
+    medicalConditions?: string;
+    medication?: string;
+    canSwim?: boolean;
+    swimDistance?: string;
     parentName?: string; // if under 18
     parentMobile?: string; // if under 18
-    medicalConsent: boolean;
-    mediaConsent: boolean;
+    medicalConsent?: boolean;
+    mediaConsent?: boolean;
     ethnicity?: string;
     religion?: string;
   };
@@ -64,7 +102,7 @@ export interface MemberProfile {
   // For Family mode
   children?: ChildProfile[];
   
-  dataConsent: boolean; // general GDPR
+  dataConsent?: boolean; // general GDPR
 }
 
 export interface User {

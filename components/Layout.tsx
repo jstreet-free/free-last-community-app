@@ -9,9 +9,10 @@ interface LayoutProps {
   onLogout: () => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  onOpenProfileModal?: () => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeTab, setActiveTab }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, activeTab, setActiveTab, onOpenProfileModal }) => {
   const isFriend = user?.role === 'friend';
   const navItems = isFriend
     ? [
@@ -61,18 +62,27 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
 
           <div className="flex items-center gap-4">
             {user ? (
-              <div className="flex items-center gap-4">
-                <div className="hidden sm:flex flex-col items-end">
-                  <p className="text-sm font-bold text-white leading-none mb-1 brand-heading truncate max-w-[150px]">
-                    {user.name || user.email.split('@')[0]}
-                  </p>
-                  <p className="text-[10px] text-white/50 font-bold uppercase tracking-widest brand-heading">
-                    {user.role} {user.role === 'team' ? '& Community Member' : ''}
-                  </p>
-                </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={onOpenProfileModal}
+                  className="flex items-center gap-2 px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/10 group active:scale-95"
+                  title="View & Edit My Profile, Emergency Numbers, and Medical Info"
+                >
+                  <div className="w-6 h-6 rounded-lg bg-brand-orange flex items-center justify-center text-white text-xs font-bold shrink-0">
+                    <Icons.User className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="hidden sm:flex flex-col items-start text-left">
+                    <p className="text-xs font-bold text-white leading-tight brand-heading truncate max-w-[130px] group-hover:text-brand-orange transition-colors">
+                      {user.name || user.email.split('@')[0]}
+                    </p>
+                    <span className="text-[9px] text-white/60 font-bold uppercase tracking-wider">
+                      Edit Profile
+                    </span>
+                  </div>
+                </button>
                 <button 
                   onClick={onLogout}
-                  className="p-2.5 bg-white/10 hover:bg-brand-orange text-white rounded-xl transition-all"
+                  className="p-2.5 bg-white/10 hover:bg-red-600/80 text-white rounded-xl transition-all"
                   title="Logout"
                 >
                   <Icons.LogOut />

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Icons, COLORS } from '../constants';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector } from '../types';
 import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
@@ -924,16 +924,45 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
-  const getSurnameAndFirstname = (fullName: string) => {
+  const getSurnameAndFirstname = (userItemOrName: User | string, profileArg?: MemberProfile) => {
+    let fullName = typeof userItemOrName === 'string' ? userItemOrName : userItemOrName.name || '';
+    let profile = typeof userItemOrName === 'object' ? userItemOrName.profile : profileArg;
+
+    // 1. If family registration and familyName is stored
+    if (profile?.familyName?.trim()) {
+      const surname = profile.familyName.trim();
+      const parentName = (profile.parentName || '').trim();
+      const firstname = parentName.replace(new RegExp(`^${surname}[,\\s]*`, 'i'), '').trim() || parentName;
+      return {
+        surname: surname,
+        firstname: firstname,
+        display: firstname ? `${surname.toUpperCase()}, ${firstname}` : surname.toUpperCase()
+      };
+    }
+
+    // 2. If fullName has a comma (e.g. "Smith, John")
     const cleanName = (fullName || '').trim();
     if (!cleanName) return { surname: 'Anonymous', firstname: '', display: 'Anonymous' };
+
+    if (cleanName.includes(',')) {
+      const [sur, ...firstParts] = cleanName.split(',');
+      const surname = sur.trim();
+      const firstname = firstParts.join(',').trim();
+      return {
+        surname,
+        firstname,
+        display: `${surname.toUpperCase()}, ${firstname}`
+      };
+    }
+
+    // 3. Split by whitespace - last token is surname
     const parts = cleanName.split(/\s+/);
     if (parts.length === 1) {
-      return { surname: parts[0], firstname: '', display: parts[0] };
+      return { surname: parts[0], firstname: '', display: parts[0].toUpperCase() };
     }
     const surname = parts[parts.length - 1];
     const firstname = parts.slice(0, parts.length - 1).join(' ');
-    return { surname, firstname, display: `${surname}, ${firstname}` };
+    return { surname, firstname, display: `${surname.toUpperCase()}, ${firstname}` };
   };
 
   const getUserAttendanceStats = (userId: string) => {
@@ -1002,7 +1031,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     const basic = (u.name || '').toLowerCase().includes(q) || 
                  (u.email || '').toLowerCase().includes(q) || 
                  (u.department || '').toLowerCase().includes(q) || 
-                 (u.role || '').toLowerCase().includes(q);
+                 (u.role || '').toLowerCase().includes(q) ||
+                 (u.profile?.familyName || '').toLowerCase().includes(q) ||
+                 (u.profile?.parentName || '').toLowerCase().includes(q);
     
     if (basic) return true;
 
@@ -1011,7 +1042,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
         return u.profile.children?.some(c => 
           c.name.toLowerCase().includes(q) || 
           c.dietaryAllergies.toLowerCase().includes(q) || 
-          c.medicalConditions.toLowerCase().includes(q)
+          c.medicalConditions.toLowerCase().includes(q) ||
+          c.collectionContacts?.some(cc => cc.name.toLowerCase().includes(q) || cc.mobile.includes(q))
         );
       } else if (u.profile.registrationType === 'teenager' && u.profile.teenagerDetails) {
         const td = u.profile.teenagerDetails;
@@ -1039,8 +1071,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   });
 
   const sortedSubTabUsers = [...subTabFilteredUsers].sort((a, b) => {
-    const aInfo = getSurnameAndFirstname(a.name);
-    const bInfo = getSurnameAndFirstname(b.name);
+    const aInfo = getSurnameAndFirstname(a);
+    const bInfo = getSurnameAndFirstname(b);
     return aInfo.surname.localeCompare(bInfo.surname, 'en', { sensitivity: 'base' }) || 
            aInfo.firstname.localeCompare(bInfo.firstname, 'en', { sensitivity: 'base' });
   });
@@ -1148,7 +1180,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       consent = u.profile.dataConsent ? "Yes" : "No";
                     }
                     
-                    const nameInfo = getSurnameAndFirstname(u.name);
+                    const nameInfo = getSurnameAndFirstname(u);
                     const stats = getUserAttendanceStats(u.id);
                     const regDate = formatRegistrationDate(u);
                     
@@ -1233,7 +1265,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Name / Dept</th>
+                  <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Surname, First Name / Account</th>
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Email / Role</th>
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Registration Date</th>
                   <th className="p-6 text-[10px] font-black brand-heading uppercase tracking-[0.2em] text-slate-400">Attendance & Activity</th>
@@ -1248,7 +1280,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   </tr>
                 ) : (
                   sortedSubTabUsers.map((userItem) => {
-                    const nameInfo = getSurnameAndFirstname(userItem.name);
+                    const nameInfo = getSurnameAndFirstname(userItem);
                     const stats = getUserAttendanceStats(userItem.id);
                     const regDate = formatRegistrationDate(userItem);
                     return (
@@ -1262,7 +1294,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{userItem.department || 'N/A'}</div>
+                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">
+                            {userItem.profile?.familyName ? `Family: ${userItem.profile.familyName}` : (userItem.department || 'N/A')}
+                          </div>
                         </td>
                         <td className="p-6">
                           <div className="text-xs font-medium text-slate-600">{userItem.email}</div>
@@ -1291,7 +1325,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               userItem.status === 'rejected' ? 'bg-red-100 text-red-600' :
                               'bg-orange-100 text-orange-600'
                             }`}>
-                              {userItem.status || 'pending'}
+                              {userItem.status === 'approved' ? 'Approved' : (userItem.status === 'rejected' ? 'Rejected' : 'Pending Home Visit')}
                             </span>
                             {userItem.profile && (
                               <span className={`text-[8px] font-bold uppercase tracking-widest p-1 rounded w-fit ${userItem.profile.dataConsent ? 'text-green-500 bg-green-50' : 'text-red-500 bg-red-50'}`}>
@@ -1301,19 +1335,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                           </div>
                         </td>
                         <td className="p-6">
-                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          <div className="flex flex-wrap gap-2">
                             <button 
                               onClick={() => setSelectedUserDetail(userItem)}
-                              className="px-4 py-2 bg-brand-light-blue text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                              className="px-3.5 py-1.5 bg-brand-light-blue text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
                             >
                               View Details
                             </button>
-                            {userItem.role === 'team' && userItem.status !== 'approved' && (
+                            {userItem.status !== 'approved' && (
                               <button 
                                 onClick={() => handleUpdateUserStatus(userItem.id, 'approved')}
-                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[9px] font-bold uppercase tracking-widest active:scale-95 transition-all shadow-sm flex items-center gap-1"
+                                title={userItem.role === 'member' ? "Mark Home Visit Done & Approve" : "Approve Account"}
                               >
-                                Approve
+                                <Icons.Check className="w-3 h-3" /> Approve {userItem.role === 'member' ? '(Home Visit)' : ''}
                               </button>
                             )}
                           </div>
@@ -3277,6 +3312,255 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 </div>
               </div>
 
+              {/* TOP SUMMARY: Rapid Emergency Access, Safeguarding, Authorized Collectors & Health */}
+              {selectedUserDetail.profile && (
+                <div className="mb-12 bg-gradient-to-br from-red-50/70 via-orange-50/50 to-amber-50/50 border-2 border-brand-orange/40 rounded-[2.5rem] p-6 md:p-8 shadow-lg">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-brand-orange/20 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-brand-orange text-white rounded-xl flex items-center justify-center shadow-md">
+                        <Icons.ShieldAlert className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black brand-heading uppercase tracking-wider text-brand-dark-blue flex items-center gap-2">
+                          Emergency, Collection & Safeguarding Summary
+                        </h3>
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          Critical rapid-access details for staff: authorized collection contacts, parent mobiles, dietary needs, and medical consents.
+                        </p>
+                      </div>
+                    </div>
+                    {selectedUserDetail.status !== 'approved' && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await handleAdminUpdateUser(selectedUserDetail.id, 'approved', editRole, uniqueNumInput, true);
+                          alert("Home visit confirmed! Member approved.");
+                        }}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-wider shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                      >
+                        <Icons.Check className="w-4 h-4" /> Mark Home Visit Done & Approve
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Primary Parent / Emergency Mobile & Address */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-white/90 rounded-2xl border border-orange-100 mb-6 shadow-sm">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Primary Contact</p>
+                      <p className="font-bold text-xs text-brand-dark-blue">{selectedUserDetail.profile.parentName || selectedUserDetail.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Emergency Mobile</p>
+                      {selectedUserDetail.profile.parentMobile ? (
+                        <a href={`tel:${selectedUserDetail.profile.parentMobile}`} className="font-bold text-xs text-brand-orange hover:underline flex items-center gap-1">
+                          <Icons.PhoneCall className="w-3.5 h-3.5" /> {selectedUserDetail.profile.parentMobile}
+                        </a>
+                      ) : (
+                        <p className="text-xs text-slate-400 font-medium">None listed</p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Address & Postcode</p>
+                      <p className="font-bold text-xs text-brand-dark-blue truncate">
+                        {selectedUserDetail.profile.address || 'N/A'}{selectedUserDetail.profile.postcode ? `, ${selectedUserDetail.profile.postcode}` : ''}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Consents Status</p>
+                      <div className="flex flex-wrap gap-1">
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${selectedUserDetail.profile.medicalConsent ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          Med: {selectedUserDetail.profile.medicalConsent ? 'YES' : 'NO'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${selectedUserDetail.profile.mediaConsent ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                          Photo: {selectedUserDetail.profile.mediaConsent ? 'YES' : 'NO'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Other Adults Living in Household (if any) */}
+                  {selectedUserDetail.profile.otherAdults && selectedUserDetail.profile.otherAdults.length > 0 && (
+                    <div className="mb-6 bg-white/90 p-4 rounded-2xl border border-orange-100 shadow-sm space-y-2">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-brand-orange flex items-center gap-1.5">
+                        <Icons.UserCheck className="w-3.5 h-3.5" /> Other Adults Living in Household ({selectedUserDetail.profile.otherAdults.length})
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        {selectedUserDetail.profile.otherAdults.map((adult, aIdx) => (
+                          <div key={aIdx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-0.5">
+                            <span className="text-[8px] font-black uppercase tracking-wider text-brand-orange block">
+                              {adult.relationship || 'Household Adult'}
+                            </span>
+                            <p className="font-bold text-xs text-brand-dark-blue">{adult.name}</p>
+                            {adult.mobile && (
+                              <a href={`tel:${adult.mobile}`} className="text-[10px] font-mono text-slate-600 hover:text-brand-orange block">
+                                📞 {adult.mobile}
+                              </a>
+                            )}
+                            {adult.email && (
+                              <p className="text-[10px] font-mono text-slate-500 truncate">
+                                ✉️ {adult.email}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Children Safeguarding Breakdown (Authorized Collection Contacts 1, 2, 3 + Mobiles, Dietary, Medical) */}
+                  {selectedUserDetail.profile.registrationType === 'family' && selectedUserDetail.profile.children && selectedUserDetail.profile.children.length > 0 && (
+                    <div className="space-y-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        Children Collection Permissions (Up to 3 Authorized Adults) & Health Data:
+                      </p>
+                      <div className="grid grid-cols-1 gap-4">
+                        {selectedUserDetail.profile.children.map((child, cIdx) => {
+                          const isWalkHome = child.canWalkHome || child.walkHomeOrCollected === 'walk_home';
+                          // Extract collection contacts
+                          let contacts: AuthorizedCollector[] = child.collectionContacts || [];
+                          if (contacts.length === 0 && child.collectionPermissions) {
+                            contacts = child.collectionPermissions.map(p => {
+                              const match = p.match(/^(.+?)\s*\((.+?)\)$/);
+                              if (match) return { name: match[1].trim(), mobile: match[2].trim() };
+                              return { name: p.trim(), mobile: '' };
+                            });
+                          }
+                          const displayContacts = [
+                            contacts[0] || { name: '', mobile: '' },
+                            contacts[1] || { name: '', mobile: '' },
+                            contacts[2] || { name: '', mobile: '' }
+                          ].slice(0, 3);
+
+                          return (
+                            <div key={cIdx} className="bg-white p-5 rounded-2xl border-2 border-orange-100 shadow-sm space-y-4">
+                              <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-7 h-7 rounded-lg bg-brand-dark-blue text-white flex items-center justify-center font-bold text-xs">
+                                    {cIdx + 1}
+                                  </span>
+                                  <h4 className="font-bold text-base text-brand-dark-blue brand-heading">{child.name}</h4>
+                                  <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
+                                    Age: {child.age || 'N/A'} (DOB: {child.dob || 'N/A'})
+                                  </span>
+                                  {isWalkHome ? (
+                                    <span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                      🚶 Walk Home Alone (Secondary)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-black bg-blue-100 text-blue-800 px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                      🚗 Adult Collection
+                                    </span>
+                                  )}
+                                </div>
+                                {child.ownMobile && (
+                                  <div className="text-xs text-slate-500 font-medium">
+                                    Child's Mobile (Secondary aged): <a href={`tel:${child.ownMobile}`} className="font-bold text-brand-orange hover:underline">{child.ownMobile}</a>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 3 Authorized Collection Contacts */}
+                              <div>
+                                <p className="text-[9px] font-black uppercase tracking-widest text-brand-orange mb-2 flex items-center gap-1.5">
+                                  <Icons.UserCheck className="w-3.5 h-3.5" /> Authorized Collection Contacts & Mobiles (3 People)
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  {displayContacts.map((contact, slotIdx) => (
+                                    <div key={slotIdx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">
+                                        Collector {slotIdx + 1}
+                                      </span>
+                                      <p className="font-bold text-xs text-brand-dark-blue truncate">
+                                        {contact.name || <span className="text-slate-400 font-normal italic">Not specified</span>}
+                                      </p>
+                                      {contact.mobile ? (
+                                        <a href={`tel:${contact.mobile}`} className="text-[11px] font-bold text-brand-orange hover:underline flex items-center gap-1">
+                                          <Icons.Phone className="w-3 h-3" /> {contact.mobile}
+                                        </a>
+                                      ) : (
+                                        <p className="text-[10px] text-slate-400 font-light">No mobile recorded</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Dietary & Medical for this child */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                <div className="p-3 bg-orange-50/80 border border-orange-100 rounded-xl">
+                                  <span className="text-[9px] font-black text-orange-500 uppercase tracking-widest block mb-0.5">
+                                    Dietary Requirements & Allergies
+                                  </span>
+                                  <p className="text-xs font-semibold text-brand-dark-blue">
+                                    {child.dietaryAllergies || 'None declared'}
+                                  </p>
+                                </div>
+                                <div className="p-3 bg-blue-50/80 border border-blue-100 rounded-xl">
+                                  <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest block mb-0.5">
+                                    Medical Conditions & Medication
+                                  </span>
+                                  <p className="text-xs font-semibold text-brand-dark-blue">
+                                    {child.medicalConditions || 'None declared'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Teenager Safeguarding & Health */}
+                  {selectedUserDetail.profile.registrationType === 'teenager' && selectedUserDetail.profile.teenagerDetails && (
+                    <div className="bg-white p-5 rounded-2xl border-2 border-orange-100 shadow-sm space-y-4">
+                      <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-2">
+                        <h4 className="font-bold text-base text-brand-dark-blue brand-heading">{selectedUserDetail.profile.teenagerDetails.name}</h4>
+                        <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
+                          Age: {selectedUserDetail.profile.teenagerDetails.age} (DOB: {selectedUserDetail.profile.teenagerDetails.dob || 'N/A'})
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-3 bg-slate-50 rounded-xl">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Teenager Mobile</p>
+                          {selectedUserDetail.profile.teenagerDetails.teenagerMobile ? (
+                            <a href={`tel:${selectedUserDetail.profile.teenagerDetails.teenagerMobile}`} className="font-bold text-xs text-brand-orange hover:underline flex items-center gap-1">
+                              <Icons.Phone className="w-3 h-3" /> {selectedUserDetail.profile.teenagerDetails.teenagerMobile}
+                            </a>
+                          ) : (
+                            <p className="text-xs text-slate-400">None</p>
+                          )}
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-xl">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Parent Name</p>
+                          <p className="font-bold text-xs text-brand-dark-blue">{selectedUserDetail.profile.parentName || 'N/A'}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-xl">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Parent Emergency Mobile</p>
+                          {selectedUserDetail.profile.parentMobile ? (
+                            <a href={`tel:${selectedUserDetail.profile.parentMobile}`} className="font-bold text-xs text-brand-orange hover:underline flex items-center gap-1">
+                              <Icons.PhoneCall className="w-3 h-3" /> {selectedUserDetail.profile.parentMobile}
+                            </a>
+                          ) : (
+                            <p className="text-xs text-slate-400">None</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="p-3 bg-orange-50/80 border border-orange-100 rounded-xl">
+                          <span className="text-[9px] font-black text-orange-500 uppercase tracking-widest block mb-0.5">Dietary Requirements & Allergies</span>
+                          <p className="text-xs font-semibold text-brand-dark-blue">{selectedUserDetail.profile.teenagerDetails.dietaryAllergies || 'None declared'}</p>
+                        </div>
+                        <div className="p-3 bg-blue-50/80 border border-blue-100 rounded-xl">
+                          <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest block mb-0.5">Medical Conditions & Medication</span>
+                          <p className="text-xs font-semibold text-brand-dark-blue">{selectedUserDetail.profile.teenagerDetails.medicalConditions || 'None declared'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Admin Core Settings Panel */}
               <div className="bg-orange-50/50 rounded-[2rem] border-2 border-brand-orange/20 p-8 mb-12">
                 <h3 className="text-xs font-black brand-heading uppercase tracking-widest text-brand-orange mb-6 flex items-center gap-2">
@@ -3451,6 +3735,31 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       </p>
                     </div>
 
+                    {/* Other Adults in Household */}
+                    {selectedUserDetail.profile.otherAdults && selectedUserDetail.profile.otherAdults.length > 0 && (
+                      <div className="bg-slate-50 p-8 rounded-3xl space-y-4">
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Other Adults Living in the House ({selectedUserDetail.profile.otherAdults.length})
+                        </h3>
+                        <div className="space-y-3">
+                          {selectedUserDetail.profile.otherAdults.map((adult, aIdx) => (
+                            <div key={aIdx} className="bg-white p-4 rounded-2xl border border-slate-200">
+                              <div className="flex justify-between items-start mb-1">
+                                <span className="font-bold text-sm text-brand-dark-blue">{adult.name}</span>
+                                <span className="text-[9px] font-black uppercase tracking-wider bg-orange-100 text-brand-orange px-2 py-0.5 rounded">
+                                  {adult.relationship || 'Adult'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-600 space-y-0.5">
+                                {adult.mobile && <p>📞 {adult.mobile}</p>}
+                                {adult.email && <p>✉️ {adult.email}</p>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Consent Tracking */}
                     <div className="space-y-4">
                       <h3 style={{ color: COLORS.orange }} className="text-xs font-black brand-heading uppercase tracking-widest mb-6">Legal Consents</h3>
@@ -3477,38 +3786,54 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     
                     {selectedUserDetail.profile.registrationType === 'family' ? (
                       <div className="space-y-4">
-                        {selectedUserDetail.profile.children?.map((child, idx) => (
-                          <div key={idx} className="bg-white border-2 border-slate-100 p-8 rounded-[2rem] shadow-sm">
-                            <div className="flex justify-between items-center mb-6">
-                              <h4 className="text-xl font-bold brand-heading text-brand-dark-blue">{child.name}</h4>
-                              <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded text-slate-500 uppercase tracking-widest">Age: {child.age}</span>
-                            </div>
-                            <div className="space-y-4">
-                              {(child.ethnicity || child.religion) && (
-                                <div className="flex flex-wrap gap-2 pb-2">
-                                  {child.ethnicity && (
-                                    <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
-                                      Ethnicity: {child.ethnicity}
+                        {selectedUserDetail.profile.children?.map((child, idx) => {
+                          const isWalkHome = child.canWalkHome || child.walkHomeOrCollected === 'walk_home';
+                          return (
+                            <div key={idx} className="bg-white border-2 border-slate-100 p-8 rounded-[2rem] shadow-sm">
+                              <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
+                                <div>
+                                  <h4 className="text-xl font-bold brand-heading text-brand-dark-blue">{child.name}</h4>
+                                  <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded text-slate-500 uppercase tracking-widest inline-block mt-1">Age: {child.age}</span>
+                                </div>
+                                <div>
+                                  {isWalkHome ? (
+                                    <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-xl uppercase tracking-wider flex items-center gap-1">
+                                      🚶 Walk Home Alone (Secondary)
                                     </span>
-                                  )}
-                                  {child.religion && (
-                                    <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
-                                      Religion: {child.religion}
+                                  ) : (
+                                    <span className="text-[10px] font-black bg-blue-100 text-blue-800 px-3 py-1.5 rounded-xl uppercase tracking-wider flex items-center gap-1">
+                                      🚗 Adult Collection
                                     </span>
                                   )}
                                 </div>
-                              )}
-                              <div className="p-4 bg-orange-50 rounded-xl border border-orange-100">
-                                <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-1">Allergies / Dietary</p>
-                                <p className="text-xs font-medium text-brand-dark-blue italic">{child.dietaryAllergies || 'No specific requests listed'}</p>
                               </div>
-                              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-                                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Medical / Health</p>
-                                <p className="text-xs font-medium text-brand-dark-blue italic">{child.medicalConditions || 'No conditions declared'}</p>
+                              <div className="space-y-4">
+                                {(child.ethnicity || child.religion) && (
+                                  <div className="flex flex-wrap gap-2 pb-2">
+                                    {child.ethnicity && (
+                                      <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                        Ethnicity: {child.ethnicity}
+                                      </span>
+                                    )}
+                                    {child.religion && (
+                                      <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                        Religion: {child.religion}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="p-4 bg-orange-50 rounded-xl border border-orange-100">
+                                  <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-1">Allergies / Dietary</p>
+                                  <p className="text-xs font-medium text-brand-dark-blue italic">{child.dietaryAllergies || 'No specific requests listed'}</p>
+                                </div>
+                                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                                  <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Medical / Health</p>
+                                  <p className="text-xs font-medium text-brand-dark-blue italic">{child.medicalConditions || 'No conditions declared'}</p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       selectedUserDetail.profile.teenagerDetails && (
