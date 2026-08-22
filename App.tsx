@@ -34,6 +34,25 @@ import {
 
 import { handleFirestoreError, OperationType } from './services/firestoreUtils';
 
+export const safeSetStorage = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e: any) {
+    if (e?.name === 'QuotaExceededError' || e?.code === 22 || e?.number === -2147024882) {
+      console.warn("Storage quota exceeded, clearing non-critical caches to free space...");
+      try {
+        localStorage.removeItem('cached_assets');
+        localStorage.removeItem('cached_gallery_albums');
+        localStorage.removeItem('cached_impact_stories');
+        localStorage.removeItem('cached_all_users');
+        localStorage.setItem(key, value);
+      } catch (innerErr) {
+        console.warn("Could not save to localStorage due to quota limit:", key);
+      }
+    }
+  }
+};
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('freeatlast_v2_user');
@@ -45,7 +64,7 @@ const App: React.FC = () => {
 
   // Persist active tab
   useEffect(() => {
-    localStorage.setItem('freeatlast_v2_active_tab', activeTab);
+    safeSetStorage('freeatlast_v2_active_tab', activeTab);
   }, [activeTab]);
 
   // Auth State Listener
@@ -93,7 +112,7 @@ const App: React.FC = () => {
             }
             
             setUser(userData);
-            localStorage.setItem('freeatlast_v2_user', JSON.stringify(userData));
+            safeSetStorage('freeatlast_v2_user', JSON.stringify(userData));
           } else {
             // User authenticated but not found in Firestore. Check cache.
             const saved = localStorage.getItem('freeatlast_v2_user');
@@ -223,7 +242,7 @@ const App: React.FC = () => {
   // Persist user and tab
   useEffect(() => {
     if (user) {
-      localStorage.setItem('freeatlast_v2_user', JSON.stringify(user));
+      safeSetStorage('freeatlast_v2_user', JSON.stringify(user));
     } else {
       localStorage.removeItem('freeatlast_v2_user');
     }
@@ -237,7 +256,7 @@ const App: React.FC = () => {
         newAssets[doc.id] = doc.data().value;
       });
       setAssets(newAssets);
-      localStorage.setItem('cached_assets', JSON.stringify(newAssets));
+      safeSetStorage('cached_assets', JSON.stringify(newAssets));
     }, (error) => {
       console.error("Assets snapshot error:", error);
     });
@@ -253,7 +272,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Announcement);
       });
       setAnnouncements(items);
-      localStorage.setItem('cached_announcements', JSON.stringify(items));
+      safeSetStorage('cached_announcements', JSON.stringify(items));
     }, (error) => {
       console.error("Announcements snapshot error:", error);
     });
@@ -268,7 +287,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Activity);
       });
       setActivities(items);
-      localStorage.setItem('cached_activities', JSON.stringify(items));
+      safeSetStorage('cached_activities', JSON.stringify(items));
     }, (error) => {
       console.error("Activities snapshot error:", error);
     });
@@ -285,7 +304,7 @@ const App: React.FC = () => {
       // Fallback to SAMPLE_PARTNERS if empty (to seed initial load)
       const finalItems = items.length > 0 ? items : SAMPLE_PARTNERS;
       setPartners(finalItems);
-      localStorage.setItem('cached_partners', JSON.stringify(finalItems));
+      safeSetStorage('cached_partners', JSON.stringify(finalItems));
     }, (error) => {
       console.error("Partners snapshot error:", error);
     });
@@ -302,7 +321,7 @@ const App: React.FC = () => {
       // Fallback to SAMPLE_IMPACT_STORIES if empty
       const finalItems = items.length > 0 ? items : SAMPLE_IMPACT_STORIES;
       setImpactStories(finalItems);
-      localStorage.setItem('cached_impact_stories', JSON.stringify(finalItems));
+      safeSetStorage('cached_impact_stories', JSON.stringify(finalItems));
     }, (error) => {
       console.error("Impact stories snapshot error:", error);
     });
@@ -332,7 +351,7 @@ const App: React.FC = () => {
         return timeB - timeA;
       });
       setInquiries(items);
-      localStorage.setItem('cached_inquiries', JSON.stringify(items));
+      safeSetStorage('cached_inquiries', JSON.stringify(items));
     }, (error) => {
       console.error("Inquiries snapshot error:", error);
     });
@@ -351,7 +370,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Booking);
       });
       setSessionRegistrations(items);
-      localStorage.setItem('cached_session_registrations', JSON.stringify(items));
+      safeSetStorage('cached_session_registrations', JSON.stringify(items));
     }, (error) => {
       console.error("Session registrations snapshot error:", error);
     });
@@ -376,7 +395,7 @@ const App: React.FC = () => {
       });
       setBookings(ids);
       setUserRegistrations(fullBookings);
-      localStorage.setItem('cached_user_registrations', JSON.stringify(fullBookings));
+      safeSetStorage('cached_user_registrations', JSON.stringify(fullBookings));
     }, (error) => {
       console.error("User bookings snapshot error:", error);
     });
@@ -392,7 +411,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as User);
       });
       setAllUsers(items);
-      localStorage.setItem('cached_all_users', JSON.stringify(items));
+      safeSetStorage('cached_all_users', JSON.stringify(items));
     }, (error) => {
       console.error("Users snapshot error:", error);
     });
@@ -410,7 +429,7 @@ const App: React.FC = () => {
       // Sort client-side
       items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setWarnings(items);
-      localStorage.setItem('cached_warnings', JSON.stringify(items));
+      safeSetStorage('cached_warnings', JSON.stringify(items));
     }, (error) => {
       console.error("Warnings snapshot error:", error);
     });
@@ -439,7 +458,7 @@ const App: React.FC = () => {
       // Sort client-side by date desc
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setTeamLogs(items);
-      localStorage.setItem('cached_team_logs', JSON.stringify(items));
+      safeSetStorage('cached_team_logs', JSON.stringify(items));
     }, (error) => {
       console.error("Team logs sync error:", error);
       if (error.message.includes('index')) {
@@ -470,7 +489,7 @@ const App: React.FC = () => {
       // Sort client-side by date desc
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setWellbeingLogs(items);
-      localStorage.setItem('cached_wellbeing_logs', JSON.stringify(items));
+      safeSetStorage('cached_wellbeing_logs', JSON.stringify(items));
     }, (error) => {
       console.error("Wellbeing logs sync error:", error);
     });
@@ -486,7 +505,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as GalleryAlbum);
       });
       setGalleryAlbums(items);
-      localStorage.setItem('cached_gallery_albums', JSON.stringify(items));
+      safeSetStorage('cached_gallery_albums', JSON.stringify(items));
     }, (error) => {
       console.error("Gallery albums snapshot error:", error);
     });
@@ -502,7 +521,7 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as CaseStudyRequest);
       });
       setCaseStudyRequests(items);
-      localStorage.setItem('cached_case_study_requests', JSON.stringify(items));
+      safeSetStorage('cached_case_study_requests', JSON.stringify(items));
     }, (error) => {
       console.error("Case study requests sync error:", error);
     });
@@ -526,7 +545,7 @@ const App: React.FC = () => {
       });
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setCaseStudies(items);
-      localStorage.setItem('cached_case_studies', JSON.stringify(items));
+      safeSetStorage('cached_case_studies', JSON.stringify(items));
     }, (error) => {
       console.error("Case studies sync error:", error);
     });
@@ -580,7 +599,7 @@ const App: React.FC = () => {
         return timeB - timeA;
       });
       setMailLogs(items);
-      localStorage.setItem('cached_mail_logs', JSON.stringify(items));
+      safeSetStorage('cached_mail_logs', JSON.stringify(items));
     }, (error) => {
       console.error("Mail logs snapshot error:", error);
     });
@@ -1394,7 +1413,7 @@ const App: React.FC = () => {
       {(user?.role === 'member' || user?.role === 'team' || user?.role === 'admin' || user?.role === 'friend') && !hasConfirmedPhotoPolicy && activeTab !== 'login' && (
         <PhotoPolicyModal onConfirm={() => {
           setHasConfirmedPhotoPolicy(true);
-          localStorage.setItem('freeatlast_photo_policy_confirmed', 'true');
+          safeSetStorage('freeatlast_photo_policy_confirmed', 'true');
         }} />
       )}
       {renderContent()}
@@ -1405,7 +1424,7 @@ const App: React.FC = () => {
           onClose={() => setShowProfileEditor(false)} 
           onUpdateUser={(updatedUser) => {
             setUser(updatedUser);
-            localStorage.setItem('freeatlast_v2_user', JSON.stringify(updatedUser));
+            safeSetStorage('freeatlast_v2_user', JSON.stringify(updatedUser));
             setNotification("Profile details updated successfully!");
             setTimeout(() => setNotification(null), 4000);
           }}

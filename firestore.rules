@@ -253,7 +253,7 @@ service cloud.firestore {
     }
 
     match /case_study_requests/{requestId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin() && isValidCaseStudyRequest(incoming());
     }
 
