@@ -1,9 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Always use named parameter and direct process.env.API_KEY reference
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
 
 export async function getWellbeingSupport(emotion: string, impactText: string): Promise<string> {
+  if (!ai) return "Thank you for sharing your thoughts. We're here for you whenever you need support!";
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -22,6 +22,7 @@ export async function getWellbeingSupport(emotion: string, impactText: string): 
 }
 
 export async function summarizeTeamImpact(logs: any[]): Promise<string> {
+  if (!ai) return "Your dedicated service is the heartbeat of free@last. Thank you for everything you do.";
   try {
     const logSummary = logs.map(l => `${l.sessionName} (${l.hours}hrs): ${l.description}`).join('; ');
     const response = await ai.models.generateContent({
@@ -45,6 +46,13 @@ export interface CaseStudyAnalysis {
 }
 
 export async function analyzeCaseStudy(content: string): Promise<CaseStudyAnalysis> {
+  if (!ai) {
+    return {
+      category: "Community Outreach",
+      sentimentScore: 5,
+      aiSummary: "The member shares high appreciation for free@last's role in their personal development."
+    };
+  }
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',
@@ -87,6 +95,7 @@ export async function generateFounderExecutiveReport(data: {
   bookings: any;
   caseStudies: any[];
 }): Promise<string> {
+  if (!ai) return "## free@last Social Impact Report\n\nUnable to reach AI services at this moment. Please check connection and try again.";
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',

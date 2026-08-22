@@ -167,7 +167,7 @@ export const SocialImpactPanel: React.FC<SocialImpactPanelProps> = ({
   const bookingsData = useMemo(() => {
     const categoryBookingsCount: Record<string, number> = {};
     bookings.forEach(b => {
-      const cat = b.sessionCategory || 'General Activities';
+      const cat = b.sessionTitle || 'General Activities';
       const prettyCat = cat === 'youth' ? 'Youth Programs' : cat === 'community' ? 'Community Outreaches' : cat === 'sports' ? 'Sports & Play' : cat;
       categoryBookingsCount[prettyCat] = (categoryBookingsCount[prettyCat] || 0) + 1;
     });
@@ -509,7 +509,7 @@ export const SocialImpactPanel: React.FC<SocialImpactPanelProps> = ({
                       cy="50%"
                       outerRadius={75}
                       dataKey="value"
-                      label={({ name, percent }) => `${name.substring(0, 8)} (${(percent * 100).toFixed(0)}%)`}
+                      label={({ name = 'Other', percent = 0 }) => `${name.substring(0, 8)} (${(percent * 100).toFixed(0)}%)`}
                       labelLine={false}
                     >
                       {demographicsData.ethnicities.map((entry, index) => (

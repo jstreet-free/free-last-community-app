@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
 import { User, Activity, GalleryAlbum } from '../types';
+import { ImageWithFallback } from '../components/ImageWithFallback';
 
 interface GalleryProps {
   user: User | null;
@@ -105,7 +106,7 @@ export const Gallery: React.FC<GalleryProps> = ({ user, assets, hasConfirmedPhot
             return (
               <div key={album.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-xl transition-all group">
                 <div className="h-64 relative overflow-hidden">
-                  <img 
+                  <ImageWithFallback
                     src={getAlbumImage(album)} 
                     alt={album.title}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"

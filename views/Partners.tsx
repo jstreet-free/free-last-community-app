@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES, Icons, COLORS } from '../constants';
 import { Partner, ImpactStory } from '../types';
+import { ImageWithFallback } from '../components/ImageWithFallback';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../services/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -119,7 +120,7 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
                 className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 flex flex-col items-center text-center group hover:border-orange-200 transition-all hover:shadow-xl active:scale-95 text-left"
               >
                 <div className="w-full aspect-square rounded-2xl overflow-hidden mb-6 shadow-lg bg-white">
-                  <img 
+                  <ImageWithFallback
                     src={partner.logo} 
                     alt={partner.name} 
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform"
@@ -155,7 +156,7 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
               className="relative w-full max-w-4xl bg-white rounded-[3rem] overflow-hidden shadow-2xl flex flex-col md:flex-row max-h-[90vh]"
             >
               <div className="w-full md:w-2/5 h-64 md:h-auto relative">
-                <img 
+                <ImageWithFallback
                   src={selectedPartner.logo} 
                   alt={selectedPartner.name} 
                   className="w-full h-full object-cover"
@@ -242,7 +243,7 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
               className="relative w-full max-w-2xl bg-white rounded-[3.5rem] overflow-hidden shadow-2xl"
             >
               <div className="h-64 relative">
-                <img 
+                <ImageWithFallback
                   src={selectedStory.image || (selectedStory.id === 's1' ? assets.GALA_AWARDS : assets.FIRE_FIGHTERS)} 
                   className="w-full h-full object-cover" 
                   alt={selectedStory.title} 
@@ -298,7 +299,7 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
               return (
                 <div key={story.id} className="bg-white rounded-[3rem] overflow-hidden shadow-sm border border-slate-100 group hover:shadow-2xl transition-all flex flex-col">
                   <div className="h-72 relative overflow-hidden">
-                    <img 
+                    <ImageWithFallback
                       src={storyImg} 
                       alt={story.title} 
                       className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"

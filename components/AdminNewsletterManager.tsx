@@ -3,6 +3,7 @@ import { db } from '../services/firebase';
 import { collection, onSnapshot, addDoc, getDocs, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Icons, COLORS } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
+import { ImageWithFallback } from './ImageWithFallback';
 
 export const AdminNewsletterManager: React.FC = () => {
   const [subscribers, setSubscribers] = useState<any[]>([]);
@@ -347,7 +348,7 @@ export const AdminNewsletterManager: React.FC = () => {
 
                 {form.imageUrl && (
                   <div className="w-full aspect-video overflow-hidden bg-slate-900">
-                    <img src={form.imageUrl} alt="Newsletter Header" className="w-full h-full object-cover" />
+                    <ImageWithFallback src={form.imageUrl} alt="Newsletter Header" className="w-full h-full object-cover" />
                   </div>
                 )}
 

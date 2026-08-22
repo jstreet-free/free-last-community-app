@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
 import { Activity, User } from '../types';
+import { ImageWithFallback } from '../components/ImageWithFallback';
 import { motion, AnimatePresence } from 'motion/react';
 
 export interface BookingDetail {
@@ -834,7 +835,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                 return (
                   <div key={activity.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row hover:shadow-xl transition-all">
                     <div className="md:w-2/5 h-56 md:h-auto relative overflow-hidden">
-                      <img 
+                      <ImageWithFallback
                         src={getActivityImage(activity)} 
                         alt={activity.title}
                         className="w-full h-full object-cover"
