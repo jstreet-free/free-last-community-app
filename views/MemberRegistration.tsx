@@ -14,7 +14,7 @@ type Step = 'type' | 'parent' | 'teenager' | 'children' | 'consent';
 
 export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, onComplete }) => {
   const [step, setStep] = useState<Step>(user.profile ? 'parent' : 'type');
-  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | 'friend' | null>(() => {
+  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | 'friend' | 'individual' | null>(() => {
     return user.profile?.registrationType || null;
   });
   
