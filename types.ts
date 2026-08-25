@@ -182,6 +182,7 @@ export interface Partner {
   details?: string;
   website?: string;
   stats?: { label: string; value: string }[];
+  order?: number;
 }
 
 export interface ImpactStory {

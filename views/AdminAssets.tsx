@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Icons, COLORS } from '../constants';
+import { ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GripVertical, Check, RefreshCw, ArrowUpDown } from 'lucide-react';
 import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector } from '../types';
 import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
@@ -9,7 +10,7 @@ import { AdminNeedsManager } from '../components/AdminNeedsManager';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 
 import { db } from '../services/firebase';
-import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 interface AdminAssetsProps {
   user: User;
@@ -125,6 +126,10 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
   const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
   const [isAddingPartner, setIsAddingPartner] = useState(false);
+  const [isSavingPartnerOrder, setIsSavingPartnerOrder] = useState(false);
+  const [partnerOrderMessage, setPartnerOrderMessage] = useState<string | null>(null);
+  const [draggedPartnerIndex, setDraggedPartnerIndex] = useState<number | null>(null);
+  const [dragOverPartnerIndex, setDragOverPartnerIndex] = useState<number | null>(null);
   const [newPartner, setNewPartner] = useState<Partial<Partner>>({
     name: '',
     description: '',
@@ -488,11 +493,100 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  const sortedPartnersList = [...partners].sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
+
+  const handleReorderPartners = async (newOrderedList: Partner[]) => {
+    try {
+      setIsSavingPartnerOrder(true);
+      const batch = writeBatch(db);
+      newOrderedList.forEach((partner, index) => {
+        const partnerRef = doc(db, 'partners', partner.id);
+        const { id, ...data } = partner;
+        batch.set(partnerRef, { ...data, order: index }, { merge: true });
+      });
+      await batch.commit();
+      setPartnerOrderMessage('Partner display order saved live!');
+      setTimeout(() => setPartnerOrderMessage(null), 3500);
+    } catch (err: any) {
+      console.error('Error reordering partners:', err);
+      alert('Failed to save partner order: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSavingPartnerOrder(false);
+    }
+  };
+
+  const handleMovePartner = async (index: number, direction: 'up' | 'down' | 'top' | 'bottom') => {
+    const list = [...sortedPartnersList];
+    if (direction === 'up' && index > 0) {
+      const temp = list[index];
+      list[index] = list[index - 1];
+      list[index - 1] = temp;
+    } else if (direction === 'down' && index < list.length - 1) {
+      const temp = list[index];
+      list[index] = list[index + 1];
+      list[index + 1] = temp;
+    } else if (direction === 'top' && index > 0) {
+      const [item] = list.splice(index, 1);
+      list.unshift(item);
+    } else if (direction === 'bottom' && index < list.length - 1) {
+      const [item] = list.splice(index, 1);
+      list.push(item);
+    } else {
+      return;
+    }
+    await handleReorderPartners(list);
+  };
+
+  const handleSetPartnerPosition = async (currentIndex: number, targetPosition: number) => {
+    const list = [...sortedPartnersList];
+    const targetIndex = Math.max(0, Math.min(list.length - 1, targetPosition - 1));
+    if (targetIndex === currentIndex) return;
+    const [item] = list.splice(currentIndex, 1);
+    list.splice(targetIndex, 0, item);
+    await handleReorderPartners(list);
+  };
+
+  const handlePartnerDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedPartnerIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    if (e.dataTransfer.setData) {
+      e.dataTransfer.setData('text/plain', String(index));
+    }
+  };
+
+  const handlePartnerDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverPartnerIndex !== index) {
+      setDragOverPartnerIndex(index);
+    }
+  };
+
+  const handlePartnerDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverPartnerIndex(null);
+    if (draggedPartnerIndex === null || draggedPartnerIndex === dropIndex) {
+      setDraggedPartnerIndex(null);
+      return;
+    }
+    const list = [...sortedPartnersList];
+    const [draggedItem] = list.splice(draggedPartnerIndex, 1);
+    list.splice(dropIndex, 0, draggedItem);
+    setDraggedPartnerIndex(null);
+    await handleReorderPartners(list);
+  };
+
   const handleSavePartner = async () => {
     try {
       if (editingPartner) {
         const { id, ...data } = editingPartner;
-        await setDoc(doc(db, 'partners', id), data);
+        const currentOrder = editingPartner.order !== undefined 
+          ? editingPartner.order 
+          : sortedPartnersList.findIndex(p => p.id === editingPartner.id);
+        await setDoc(doc(db, 'partners', id), {
+          ...data,
+          order: currentOrder >= 0 ? currentOrder : sortedPartnersList.length
+        });
         setEditingPartner(null);
       } else if (isAddingPartner) {
         if (!newPartner.name) {
@@ -509,7 +603,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           description: newPartner.description || '',
           details: newPartner.details || '',
           website: newPartner.website || '#',
-          stats: newPartner.stats || []
+          stats: newPartner.stats || [],
+          order: sortedPartnersList.length
         };
 
         await addDoc(collection(db, 'partners'), partnerToSave);
@@ -1964,18 +2059,47 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
       {activeAdminTab === 'partners' && (
         <div className="animate-fadeIn">
-          <div className="flex justify-between items-center mb-12">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
             <div>
               <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">Partner Network</h2>
-              <p className="text-gray-500 font-light mt-1">Manage the organizations that support free@last.</p>
+              <p className="text-gray-500 font-light mt-1">Manage and arrange the display order of partners on the public Partner page.</p>
             </div>
-            <button 
-              onClick={() => setIsAddingPartner(true)}
-              style={{ backgroundColor: COLORS.orange }}
-              className="px-8 py-3 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-lg hover:brightness-110 active:scale-95 flex items-center gap-2"
-            >
-              <Icons.Plus /> Add New Partner
-            </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              {partnerOrderMessage && (
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold brand-heading animate-fadeIn">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>{partnerOrderMessage}</span>
+                </div>
+              )}
+              {isSavingPartnerOrder && (
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold brand-heading animate-pulse">
+                  <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                  <span>Saving Order...</span>
+                </div>
+              )}
+              <button 
+                onClick={() => setIsAddingPartner(true)}
+                style={{ backgroundColor: COLORS.orange }}
+                className="px-8 py-3 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-lg hover:brightness-110 active:scale-95 flex items-center gap-2"
+              >
+                <Icons.Plus /> Add New Partner
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-orange-50/60 border border-brand-orange/20 rounded-2xl p-4 mb-8 flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-brand-orange/10 text-brand-orange flex items-center justify-center font-bold text-sm">
+                <ArrowUpDown className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold brand-heading uppercase text-brand-dark-blue">Display Sequence Controls</p>
+                <p className="text-[11px] text-gray-500 font-normal">Use the <b>↑ / ↓ buttons</b>, the <b>Position Jump selector</b>, or <b>drag cards</b> to rearrange how partners appear on the public page.</p>
+              </div>
+            </div>
+            <div className="text-[11px] font-bold brand-heading uppercase text-gray-400 bg-white px-3 py-1.5 rounded-lg border border-orange-100 shadow-sm">
+              Total Partners: {sortedPartnersList.length}
+            </div>
           </div>
 
           <div className="space-y-6">
@@ -2117,37 +2241,145 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {partners.map((partner) => (
-                <div key={partner.id} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-6 group hover:shadow-md transition-all">
-                  <ImageWithFallback
-                    src={partner.logo} 
-                    alt="" 
-                    className="w-20 h-20 object-cover rounded-2xl border border-gray-100" 
-                  />
-                  <div className="flex-grow">
-                    <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold brand-heading mb-1">{partner.name}</h3>
-                    <p className="text-xs text-gray-500 font-light line-clamp-1">{partner.description}</p>
+              {sortedPartnersList.map((partner, index) => {
+                const isFirst = index === 0;
+                const isLast = index === sortedPartnersList.length - 1;
+                const isDraggingThis = draggedPartnerIndex === index;
+                const isOverThis = dragOverPartnerIndex === index;
+
+                return (
+                  <div 
+                    key={partner.id} 
+                    draggable
+                    onDragStart={(e) => handlePartnerDragStart(e, index)}
+                    onDragOver={(e) => handlePartnerDragOver(e, index)}
+                    onDrop={(e) => handlePartnerDrop(e, index)}
+                    className={`bg-white p-6 rounded-3xl border transition-all relative flex flex-col justify-between group ${
+                      isDraggingThis 
+                        ? 'opacity-40 border-dashed border-brand-orange shadow-lg scale-98' 
+                        : isOverThis 
+                          ? 'border-brand-orange ring-2 ring-brand-orange/30 shadow-md' 
+                          : 'border-gray-100 shadow-sm hover:shadow-md'
+                    }`}
+                  >
+                    {/* Top Controls & Position Bar */}
+                    <div className="flex items-center justify-between gap-2 pb-4 mb-4 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <div 
+                          title="Drag to re-order" 
+                          className="cursor-grab active:cursor-grabbing p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <GripVertical className="w-4 h-4" />
+                        </div>
+                        <span className="px-2.5 py-1 bg-brand-dark-blue/5 text-brand-dark-blue text-xs font-bold rounded-lg brand-heading tracking-wide border border-brand-dark-blue/10">
+                          #{index + 1}
+                        </span>
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          {isFirst ? 'First on page' : isLast ? 'Last on page' : `Slot ${index + 1}`}
+                        </span>
+                      </div>
+
+                      {/* Re-order Toolbar Buttons */}
+                      <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-gray-200/70">
+                        <button
+                          title="Move to Top"
+                          disabled={isFirst || isSavingPartnerOrder}
+                          onClick={() => handleMovePartner(index, 'top')}
+                          className="p-1.5 rounded-lg text-gray-600 hover:text-brand-orange hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-600 transition-all"
+                        >
+                          <ArrowUpToLine className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          title="Move Up"
+                          disabled={isFirst || isSavingPartnerOrder}
+                          onClick={() => handleMovePartner(index, 'up')}
+                          className="p-1.5 rounded-lg text-gray-600 hover:text-brand-orange hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-600 transition-all"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          title="Move Down"
+                          disabled={isLast || isSavingPartnerOrder}
+                          onClick={() => handleMovePartner(index, 'down')}
+                          className="p-1.5 rounded-lg text-gray-600 hover:text-brand-orange hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-600 transition-all"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          title="Move to Bottom"
+                          disabled={isLast || isSavingPartnerOrder}
+                          onClick={() => handleMovePartner(index, 'bottom')}
+                          className="p-1.5 rounded-lg text-gray-600 hover:text-brand-orange hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-600 transition-all"
+                        >
+                          <ArrowDownToLine className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="h-4 w-px bg-gray-200 mx-0.5" />
+                        <select
+                          title="Jump directly to position"
+                          disabled={isSavingPartnerOrder}
+                          value={index + 1}
+                          onChange={(e) => handleSetPartnerPosition(index, Number(e.target.value))}
+                          className="bg-white border border-gray-200 text-gray-700 text-[10px] font-bold brand-heading rounded-lg px-2 py-1 outline-none hover:border-brand-orange focus:ring-1 focus:ring-brand-orange cursor-pointer"
+                        >
+                          {sortedPartnersList.map((_, pIdx) => (
+                            <option key={pIdx} value={pIdx + 1}>
+                              Pos #{pIdx + 1} {pIdx === 0 ? '(Top)' : pIdx === sortedPartnersList.length - 1 ? '(End)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Partner Content Details */}
+                    <div className="flex items-start gap-4 mb-4">
+                      <ImageWithFallback
+                        src={partner.logo} 
+                        alt={partner.name} 
+                        className="w-16 h-16 object-cover rounded-2xl border border-gray-100 shadow-sm shrink-0 bg-white" 
+                      />
+                      <div className="flex-grow min-w-0">
+                        <h3 style={{ color: COLORS.secondary }} className="text-lg font-bold brand-heading mb-1 truncate">{partner.name}</h3>
+                        <p className="text-xs text-gray-500 font-light line-clamp-2 leading-relaxed">{partner.description}</p>
+                        {partner.website && partner.website !== '#' && (
+                          <a 
+                            href={partner.website} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="inline-block mt-1 text-[10px] text-brand-orange font-medium hover:underline truncate max-w-full"
+                          >
+                            {partner.website}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-50 mt-auto">
+                      <div className="text-[10px] text-gray-400 font-medium">
+                        {partner.stats && partner.stats.length > 0 ? `${partner.stats.length} impact stat${partner.stats.length > 1 ? 's' : ''}` : 'No stats added'}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setEditingPartner(partner)}
+                          className="px-4 py-2 bg-slate-50 text-slate-500 hover:text-brand-orange hover:bg-brand-orange/10 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all"
+                        >
+                          Edit
+                        </button>
+                        <button 
+                          onClick={() => handleDeletePartner(partner.id)}
+                          className={`px-4 py-2 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all ${
+                            deletingId === partner.id 
+                              ? 'bg-red-600 text-white animate-pulse' 
+                              : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                          }`}
+                        >
+                          {deletingId === partner.id ? 'Confirm?' : 'Delete'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    <button 
-                      onClick={() => setEditingPartner(partner)}
-                      className="px-4 py-2 bg-slate-50 text-slate-400 hover:text-brand-orange hover:bg-brand-orange/10 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all"
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      onClick={() => handleDeletePartner(partner.id)}
-                      className={`px-4 py-2 rounded-lg font-bold text-[9px] brand-heading uppercase tracking-widest transition-all ${
-                        deletingId === partner.id 
-                          ? 'bg-red-600 text-white animate-pulse' 
-                          : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
-                      }`}
-                    >
-                      {deletingId === partner.id ? 'Confirm?' : 'Delete'}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

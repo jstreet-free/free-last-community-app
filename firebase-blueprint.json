@@ -57,6 +57,7 @@
         "description": { "type": "string" },
         "details": { "type": "string" },
         "website": { "type": "string" },
+        "order": { "type": "number", "description": "Display order index on the partner page" },
         "stats": {
           "type": "array",
           "items": {

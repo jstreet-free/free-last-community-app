@@ -51,6 +51,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'volunteering for activities, ongoing fundraising, governance support and sharing influence',
     details: 'Deloitte has been a cornerstone partner for the Nechells Hub, providing professional expertise to our governance board and direct volunteer support for our weekly youth sessions. Their commitment extends beyond financial aid, embedding their team within our community to share influence and advocate for Nechells youth.',
     website: 'https://www2.deloitte.com/uk/en.html',
+    order: 0,
     stats: [
       { label: 'Volunteers', value: '45+' },
       { label: 'Fundraising', value: '£12k+' },
@@ -64,6 +65,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'new experiences, sharing influence, product reviews',
     details: 'Booghe Toys brings the magic of play to our children. Through their partnership, we provide brand new experiences including technology workshops and toy review panels, giving our young people a voice in the products they love.',
     website: 'https://www.booghe.co.uk/',
+    order: 1,
     stats: [
       { label: 'Toys Donated', value: '500+' },
       { label: 'Workshops', value: '12' },
@@ -77,6 +79,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: '20+ businesses providing long term relational support, raising funds, pro-bono work and introductions',
     details: 'Sunrise Networks is a powerful collective of local businesses dedicated to Nechells. They provide a network of support that bridges the gap between the corporate world and our community, offering everything from legal advice to direct introductions for job seekers.',
     website: 'https://sunrisenetworks.co.uk/',
+    order: 2,
     stats: [
       { label: 'Businesses', value: '22' },
       { label: 'Pro-Bono Hours', value: '200+' },
@@ -90,6 +93,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'pro-bono support, volunteering, sharing influence',
     details: 'Gowlings provides critical legal support and corporate volunteering. Their team regularly visits the hub to mentor our teenagers on career paths in law and professional services, while their influence helps us secure and protect our community assets.',
     website: 'https://gowlingwlg.com/',
+    order: 3,
     stats: [
       { label: 'Legal Support', value: '£25k' },
       { label: 'Mentors', value: '10' },
@@ -103,6 +107,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'Community outreach and local support initiatives.',
     details: 'This partner focuses on hyper-local outreach, ensuring that the hardest-to-reach families in Nechells are connected with our services.',
     website: '#',
+    order: 4,
     stats: [
       { label: 'Families Helped', value: '50' },
       { label: 'Outreach Events', value: '5' }
@@ -115,6 +120,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'Sports equipment and active lifestyle coaching.',
     details: 'Providing the tools and training necessary to keep our youth active and healthy through organized sports and individual coaching.',
     website: '#',
+    order: 5,
     stats: [
       { label: 'Equipment Value', value: '£5k' },
       { label: 'Coaching Hours', value: '150' }
@@ -127,6 +133,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'Technology grants and digital skills workshops.',
     details: 'Closing the digital divide by providing laptops and training to students who lack access to technology at home.',
     website: '#',
+    order: 6,
     stats: [
       { label: 'Laptops Donated', value: '25' },
       { label: 'Digital Literacy', value: '95%' }
@@ -139,6 +146,7 @@ export const SAMPLE_PARTNERS: Partner[] = [
     description: 'Mental health advocacy and wellbeing resources.',
     details: 'Ensuring our members have access to the counseling and emotional support they need to navigate life challenges.',
     website: '#',
+    order: 7,
     stats: [
       { label: 'Counseling Sessions', value: '100+' },
       { label: 'Wellbeing Toolkits', value: '200' }

@@ -301,8 +301,10 @@ const App: React.FC = () => {
       snapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as Partner);
       });
+      // Sort by order ascending
+      items.sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
       // Fallback to SAMPLE_PARTNERS if empty (to seed initial load)
-      const finalItems = items.length > 0 ? items : SAMPLE_PARTNERS;
+      const finalItems = items.length > 0 ? items : [...SAMPLE_PARTNERS].sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
       setPartners(finalItems);
       safeSetStorage('cached_partners', JSON.stringify(finalItems));
     }, (error) => {

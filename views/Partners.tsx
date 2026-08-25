@@ -113,7 +113,7 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 md:gap-12">
-            {partners.map((partner) => (
+            {[...partners].sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999)).map((partner) => (
               <button 
                 key={partner.id} 
                 onClick={() => setSelectedPartner(partner)}
