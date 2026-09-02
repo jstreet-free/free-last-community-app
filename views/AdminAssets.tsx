@@ -10,7 +10,7 @@ import { AdminNeedsManager } from '../components/AdminNeedsManager';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 
 import { db } from '../services/firebase';
-import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment } from 'firebase/firestore';
 
 interface AdminAssetsProps {
   user: User;
@@ -23,6 +23,7 @@ interface AdminAssetsProps {
   impactStories: ImpactStory[];
   inquiries: Inquiry[];
   bookings: Booking[];
+  onDeleteBooking?: (bookingId: string) => void;
   users: User[];
   teamLogs?: TeamLog[];
   wellbeingLogs?: MoodLog[];
@@ -66,6 +67,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   impactStories,
   inquiries,
   bookings,
+  onDeleteBooking,
   users,
   teamLogs = [],
   wellbeingLogs = [],
@@ -1119,6 +1121,89 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  const handleDeleteBooking = async (bookingId: string) => {
+    if (onDeleteBooking) {
+      onDeleteBooking(bookingId);
+      return;
+    }
+    try {
+      const b = (bookings || []).find(item => item.id === bookingId);
+      if (b && b.status !== 'cancelled' && b.sessionId) {
+        try {
+          const actRef = doc(db, 'activities', b.sessionId);
+          await updateDoc(actRef, { bookedCount: increment(-1) });
+        } catch (e) {
+          console.warn("Could not decrement activity booked count:", e);
+        }
+      }
+      await deleteDoc(doc(db, 'bookings', bookingId));
+      alert("Booking record deleted successfully.");
+    } catch (error: any) {
+      console.error("Error deleting booking:", error);
+      alert("Failed to delete booking: " + (error.message || "Permission error"));
+    }
+  };
+
+  const handleCleanDuplicatesForSession = async (sessionBookings: Booking[]) => {
+    const groups = new Map<string, Booking[]>();
+    sessionBookings.forEach(b => {
+      if (b.status === 'cancelled') return;
+      const key = `${b.sessionId}_${b.sessionDate}_${(b.participantName || '').toLowerCase().trim()}`;
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key)!.push(b);
+    });
+
+    const duplicatesToDelete: Booking[] = [];
+    groups.forEach((items) => {
+      if (items.length > 1) {
+        // Keep the one with attended marked or earliest booking, delete the others
+        const sorted = [...items].sort((a, b) => {
+          if (a.attended !== undefined && b.attended === undefined) return -1;
+          if (b.attended !== undefined && a.attended === undefined) return 1;
+          const aTime = a.bookingDate?.toDate ? a.bookingDate.toDate().getTime() : 0;
+          const bTime = b.bookingDate?.toDate ? b.bookingDate.toDate().getTime() : 0;
+          return aTime - bTime;
+        });
+        duplicatesToDelete.push(...sorted.slice(1));
+      }
+    });
+
+    if (duplicatesToDelete.length === 0) {
+      alert("No duplicate bookings found for this session.");
+      return;
+    }
+
+    if (!window.confirm(`Found ${duplicatesToDelete.length} duplicate booking(s) for this session. Delete them now?\n\nThis will keep 1 active booking per participant and permanently remove the duplicates.`)) {
+      return;
+    }
+
+    try {
+      let deletedCount = 0;
+      for (const dup of duplicatesToDelete) {
+        if (onDeleteBooking) {
+          onDeleteBooking(dup.id);
+        } else {
+          if (dup.status !== 'cancelled' && dup.sessionId) {
+            try {
+              const actRef = doc(db, 'activities', dup.sessionId);
+              await updateDoc(actRef, { bookedCount: increment(-1) });
+            } catch (e) {
+              console.warn("Activity count update warning:", e);
+            }
+          }
+          await deleteDoc(doc(db, 'bookings', dup.id));
+        }
+        deletedCount++;
+      }
+      alert(`Successfully deleted ${deletedCount} duplicate booking(s).`);
+    } catch (err: any) {
+      console.error("Error deleting duplicates:", err);
+      alert("Failed to delete duplicates: " + (err.message || "Unknown error"));
+    }
+  };
+
   const filteredUsers = users.filter(u => {
     const q = userSearchQuery.toLowerCase();
     if (!q) return true;
@@ -1717,7 +1802,31 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                         ← Back to Sessions List
                       </button>
 
-                      <div className="flex gap-3">
+                      <div className="flex flex-wrap gap-3">
+                        {(() => {
+                          const participantCounts = new Map<string, number>();
+                          allBookingsForActivity.forEach(b => {
+                            if (b.status === 'cancelled') return;
+                            const key = (b.participantName || '').toLowerCase().trim();
+                            participantCounts.set(key, (participantCounts.get(key) || 0) + 1);
+                          });
+                          let dupTotal = 0;
+                          participantCounts.forEach(count => {
+                            if (count > 1) dupTotal += (count - 1);
+                          });
+                          if (dupTotal > 0) {
+                            return (
+                              <button
+                                onClick={() => handleCleanDuplicatesForSession(allBookingsForActivity)}
+                                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-2 animate-pulse"
+                                title="Remove duplicate bookings, keeping 1 per person"
+                              >
+                                ⚠️ Clean {dupTotal} Duplicate{dupTotal > 1 ? 's' : ''}
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
                         <button
                           onClick={() => handleDownloadActivityBookingsCSV(selectedActivity.title, sortedBookingsForActivity)}
                           style={{ backgroundColor: COLORS.secondary }}
@@ -1826,12 +1935,13 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker & Contact Info</th>
                               <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Registration Date</th>
                               <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
+                              <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Action</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
                             {sortedBookingsForActivity.length === 0 ? (
                               <tr>
-                                <td colSpan={4} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">
+                                <td colSpan={5} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">
                                   No registered participants found for this filter
                                 </td>
                               </tr>
@@ -1839,11 +1949,22 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               sortedBookingsForActivity.map((b) => {
                                 const nameInfo = getParticipantSurnameAndFirstname(b.participantName);
                                 const bookingDateStr = b.bookingDate?.toDate ? b.bookingDate.toDate().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent';
+                                const isDup = allBookingsForActivity.filter(other => 
+                                  other.status !== 'cancelled' && 
+                                  (other.participantName || '').toLowerCase().trim() === (b.participantName || '').toLowerCase().trim()
+                                ).length > 1;
                                 
                                 return (
-                                  <tr key={b.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${isDup ? 'bg-amber-50/40' : ''}`}>
                                     <td className="px-8 py-5">
-                                      <p className="text-brand-dark-blue font-black brand-heading text-sm">{nameInfo.display}</p>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-brand-dark-blue font-black brand-heading text-sm">{nameInfo.display}</p>
+                                        {isDup && (
+                                          <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 border border-amber-300">
+                                            Duplicate
+                                          </span>
+                                        )}
+                                      </div>
                                       <p className="text-[9px] text-slate-400 font-extrabold uppercase mt-0.5 tracking-wider">ID: {b.id.slice(-6)}</p>
                                     </td>
                                     <td className="px-8 py-5">
@@ -1891,6 +2012,19 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                         </button>
                                       </div>
                                     </td>
+                                    <td className="px-6 py-5 text-center">
+                                      <button
+                                        onClick={() => {
+                                          if (window.confirm(`Permanently delete booking for "${b.participantName}"?\n\nThis will remove this booking registration record from the system.`)) {
+                                            handleDeleteBooking(b.id);
+                                          }
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-all shadow-sm active:scale-95"
+                                        title="Delete booking"
+                                      >
+                                        Delete
+                                      </button>
+                                    </td>
                                   </tr>
                                 );
                               })
@@ -1906,18 +2040,42 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           ) : (
             /* Traditional Live Bookings Log View */
             <div className="space-y-8">
-              <div className="flex justify-between items-center bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-sm gap-4">
                 <div>
                   <h3 className="text-sm font-bold text-brand-dark-blue brand-heading uppercase">Live Bookings Feed</h3>
                   <p className="text-xs text-slate-400">All registrations listed sequentially as they arrive.</p>
                 </div>
-                <button 
-                  onClick={handleDownloadBookingsCSV}
-                  style={{ backgroundColor: COLORS.secondary }}
-                  className="px-6 py-2.5 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95 flex items-center gap-2"
-                >
-                  <Icons.Camera /> Download All CSV
-                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  {(() => {
+                    const groups = new Map<string, number>();
+                    bookings.forEach(b => {
+                      if (b.status === 'cancelled') return;
+                      const k = `${b.sessionId}_${b.sessionDate}_${(b.participantName || '').toLowerCase().trim()}`;
+                      groups.set(k, (groups.get(k) || 0) + 1);
+                    });
+                    let dups = 0;
+                    groups.forEach(c => { if (c > 1) dups += (c - 1); });
+                    if (dups > 0) {
+                      return (
+                        <button
+                          onClick={() => handleCleanDuplicatesForSession(bookings)}
+                          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-2 animate-pulse"
+                          title="Purge all duplicate registrations across sessions, keeping 1 per person"
+                        >
+                          ⚠️ Clean All {dups} Duplicate{dups > 1 ? 's' : ''}
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+                  <button 
+                    onClick={handleDownloadBookingsCSV}
+                    style={{ backgroundColor: COLORS.secondary }}
+                    className="px-6 py-2.5 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95 flex items-center gap-2"
+                  >
+                    <Icons.Camera /> Download All CSV
+                  </button>
+                </div>
               </div>
 
               <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
@@ -1932,74 +2090,104 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Contact</th>
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booking Made</th>
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance</th>
+                        <th className="px-6 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {bookings.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No registrations found</td>
+                          <td colSpan={8} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">No registrations found</td>
                         </tr>
                       ) : (
-                        bookings.map((booking) => (
-                          <tr key={booking.id} className="hover:bg-slate-50/50 transition-colors group">
-                            <td className="px-8 py-6">
-                              <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
-                              <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">ID: {booking.sessionId.slice(-6)}</p>
-                            </td>
-                            <td className="px-8 py-6">
-                              <p className="text-slate-600 font-bold text-xs">{new Date(booking.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</p>
-                              <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">{booking.sessionTime}</p>
-                            </td>
-                            <td className="px-8 py-6">
-                              <p className="text-brand-dark-blue font-bold text-sm tracking-tight">{booking.participantName}</p>
-                            </td>
-                            <td className="px-8 py-6">
-                              <p className="text-slate-500 text-xs font-light">{booking.bookerName}</p>
-                            </td>
-                            <td className="px-8 py-6">
-                              <p style={{ color: COLORS.orange }} className="font-bold text-xs">{booking.bookerMobile}</p>
-                            </td>
-                            <td className="px-8 py-6">
-                              <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
-                                {booking.bookingDate?.toDate ? booking.bookingDate.toDate().toLocaleString() : 'Recent'}
-                              </p>
-                            </td>
-                            <td className="px-8 py-6">
-                              <div className="flex justify-center items-center gap-2">
+                        bookings.map((booking) => {
+                          const isDup = bookings.filter(other => 
+                            other.status !== 'cancelled' && 
+                            other.sessionId === booking.sessionId && 
+                            other.sessionDate === booking.sessionDate && 
+                            (other.participantName || '').toLowerCase().trim() === (booking.participantName || '').toLowerCase().trim()
+                          ).length > 1;
+
+                          return (
+                            <tr key={booking.id} className={`hover:bg-slate-50/50 transition-colors group ${isDup ? 'bg-amber-50/40' : ''}`}>
+                              <td className="px-8 py-6">
+                                <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
+                                <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">ID: {booking.sessionId.slice(-6)}</p>
+                              </td>
+                              <td className="px-8 py-6">
+                                <p className="text-slate-600 font-bold text-xs">{new Date(booking.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</p>
+                                <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">{booking.sessionTime}</p>
+                              </td>
+                              <td className="px-8 py-6">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-brand-dark-blue font-bold text-sm tracking-tight">{booking.participantName}</p>
+                                  {isDup && (
+                                    <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 border border-amber-300">
+                                      Duplicate
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-8 py-6">
+                                <p className="text-slate-500 text-xs font-light">{booking.bookerName}</p>
+                              </td>
+                              <td className="px-8 py-6">
+                                <p style={{ color: COLORS.orange }} className="font-bold text-xs">{booking.bookerMobile}</p>
+                              </td>
+                              <td className="px-8 py-6">
+                                <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
+                                  {booking.bookingDate?.toDate ? booking.bookingDate.toDate().toLocaleString() : 'Recent'}
+                                </p>
+                              </td>
+                              <td className="px-8 py-6">
+                                <div className="flex justify-center items-center gap-2">
+                                  <button
+                                    onClick={() => handleUpdateBookingAttendance(booking.id, true)}
+                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                      booking.attended === true 
+                                        ? 'bg-green-500 text-white shadow-sm' 
+                                        : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
+                                    }`}
+                                  >
+                                    ✓ Attended
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateBookingAttendance(booking.id, false)}
+                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                      booking.attended === false 
+                                        ? 'bg-red-500 text-white shadow-sm' 
+                                        : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
+                                    }`}
+                                  >
+                                    ✗ Absent
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateBookingAttendance(booking.id, null)}
+                                    className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                      booking.attended === undefined || booking.attended === null
+                                        ? 'bg-slate-300 text-slate-700' 
+                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                                    }`}
+                                  >
+                                    Reset
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="px-6 py-6 text-center">
                                 <button
-                                  onClick={() => handleUpdateBookingAttendance(booking.id, true)}
-                                  className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                    booking.attended === true 
-                                      ? 'bg-green-500 text-white shadow-sm' 
-                                      : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
-                                  }`}
+                                  onClick={() => {
+                                    if (window.confirm(`Permanently delete booking for "${booking.participantName}" from ${booking.sessionTitle}?`)) {
+                                      handleDeleteBooking(booking.id);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-all shadow-sm active:scale-95"
+                                  title="Delete booking"
                                 >
-                                  ✓ Attended
+                                  Delete
                                 </button>
-                                <button
-                                  onClick={() => handleUpdateBookingAttendance(booking.id, false)}
-                                  className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                    booking.attended === false 
-                                      ? 'bg-red-500 text-white shadow-sm' 
-                                      : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
-                                  }`}
-                                >
-                                  ✗ Absent
-                                </button>
-                                <button
-                                  onClick={() => handleUpdateBookingAttendance(booking.id, null)}
-                                  className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                    booking.attended === undefined || booking.attended === null
-                                      ? 'bg-slate-300 text-slate-700' 
-                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
-                                  }`}
-                                >
-                                  Reset
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -4161,78 +4349,135 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
                   const sortedUserBookings = [...userBookings].sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime());
 
+                  const userDupCount = (() => {
+                    const map = new Map<string, number>();
+                    userBookings.forEach(b => {
+                      if (b.status === 'cancelled') return;
+                      const k = `${b.sessionId}_${b.sessionDate}_${(b.participantName || '').toLowerCase().trim()}`;
+                      map.set(k, (map.get(k) || 0) + 1);
+                    });
+                    let d = 0;
+                    map.forEach(c => { if (c > 1) d += (c - 1); });
+                    return d;
+                  })();
+
                   return (
-                    <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                          <thead>
-                            <tr className="bg-slate-50 border-b border-slate-100">
-                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Details</th>
-                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date & Time</th>
-                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant</th>
-                              <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {sortedUserBookings.map((b) => (
-                              <tr key={b.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="px-6 py-4">
-                                  <p className="text-brand-dark-blue font-bold text-sm">{b.sessionTitle}</p>
-                                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">ID: {b.sessionId.slice(-6)}</p>
-                                </td>
-                                <td className="px-6 py-4 text-xs font-semibold text-slate-600">
-                                  {new Date(b.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                  <span className="block text-[10px] text-slate-400 font-normal">{b.sessionTime}</span>
-                                </td>
-                                <td className="px-6 py-4 text-xs font-medium text-slate-700">
-                                  {b.participantName}
-                                </td>
-                                <td className="px-6 py-4">
-                                  {b.status === 'cancelled' ? (
-                                    <div className="flex justify-center">
-                                      <span className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 text-red-500 border border-red-100">
-                                        Cancelled by Member
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <div className="flex justify-center items-center gap-2">
-                                      <button
-                                        onClick={() => handleUpdateBookingAttendance(b.id, true)}
-                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                          b.attended === true 
-                                            ? 'bg-green-500 text-white shadow-sm' 
-                                            : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
-                                        }`}
-                                      >
-                                        ✓ Attended
-                                      </button>
-                                      <button
-                                        onClick={() => handleUpdateBookingAttendance(b.id, false)}
-                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                          b.attended === false 
-                                            ? 'bg-red-500 text-white shadow-sm' 
-                                            : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
-                                        }`}
-                                      >
-                                        ✗ Absent
-                                      </button>
-                                      <button
-                                        onClick={() => handleUpdateBookingAttendance(b.id, null)}
-                                        className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
-                                          b.attended === undefined || b.attended === null
-                                            ? 'bg-slate-300 text-slate-700' 
-                                            : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
-                                        }`}
-                                      >
-                                        Reset
-                                      </button>
-                                    </div>
-                                  )}
-                                </td>
+                    <div className="space-y-4">
+                      {userDupCount > 0 && (
+                        <div className="flex justify-between items-center bg-amber-50 border border-amber-200 p-4 rounded-2xl">
+                          <p className="text-xs font-bold text-amber-900">
+                            ⚠️ This user has {userDupCount} duplicate session booking{userDupCount > 1 ? 's' : ''}.
+                          </p>
+                          <button
+                            onClick={() => handleCleanDuplicatesForSession(userBookings)}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-sm active:scale-95"
+                          >
+                            Clean {userDupCount} Duplicate{userDupCount > 1 ? 's' : ''}
+                          </button>
+                        </div>
+                      )}
+                      <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="bg-slate-50 border-b border-slate-100">
+                                <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Details</th>
+                                <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date & Time</th>
+                                <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant</th>
+                                <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
+                                <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Action</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                              {sortedUserBookings.map((b) => {
+                                const isDup = userBookings.filter(other => 
+                                  other.status !== 'cancelled' && 
+                                  other.sessionId === b.sessionId && 
+                                  other.sessionDate === b.sessionDate && 
+                                  (other.participantName || '').toLowerCase().trim() === (b.participantName || '').toLowerCase().trim()
+                                ).length > 1;
+
+                                return (
+                                <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${isDup ? 'bg-amber-50/40' : ''}`}>
+                                  <td className="px-6 py-4">
+                                    <p className="text-brand-dark-blue font-bold text-sm">{b.sessionTitle}</p>
+                                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">ID: {b.sessionId.slice(-6)}</p>
+                                  </td>
+                                  <td className="px-6 py-4 text-xs font-semibold text-slate-600">
+                                    {new Date(b.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    <span className="block text-[10px] text-slate-400 font-normal">{b.sessionTime}</span>
+                                  </td>
+                                  <td className="px-6 py-4 text-xs font-medium text-slate-700">
+                                    <div className="flex items-center gap-2">
+                                      <span>{b.participantName}</span>
+                                      {isDup && (
+                                        <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 border border-amber-300">
+                                          Duplicate
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    {b.status === 'cancelled' ? (
+                                      <div className="flex justify-center">
+                                        <span className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 text-red-500 border border-red-100">
+                                          Cancelled by Member
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex justify-center items-center gap-2">
+                                        <button
+                                          onClick={() => handleUpdateBookingAttendance(b.id, true)}
+                                          className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                            b.attended === true 
+                                              ? 'bg-green-500 text-white shadow-sm' 
+                                              : 'bg-slate-100 hover:bg-green-50 text-slate-600 hover:text-green-600'
+                                          }`}
+                                        >
+                                          ✓ Attended
+                                        </button>
+                                        <button
+                                          onClick={() => handleUpdateBookingAttendance(b.id, false)}
+                                          className={`px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                            b.attended === false 
+                                              ? 'bg-red-500 text-white shadow-sm' 
+                                              : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600'
+                                          }`}
+                                        >
+                                          ✗ Absent
+                                        </button>
+                                        <button
+                                          onClick={() => handleUpdateBookingAttendance(b.id, null)}
+                                          className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${
+                                            b.attended === undefined || b.attended === null
+                                              ? 'bg-slate-300 text-slate-700' 
+                                              : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                                          }`}
+                                        >
+                                          Reset
+                                        </button>
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4 text-center">
+                                    <button
+                                      onClick={() => {
+                                        if (window.confirm(`Permanently delete booking for "${b.participantName}" from ${b.sessionTitle}?`)) {
+                                          handleDeleteBooking(b.id);
+                                        }
+                                      }}
+                                      className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-all shadow-sm active:scale-95"
+                                      title="Delete booking"
+                                    >
+                                      Delete
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     </div>
                   );

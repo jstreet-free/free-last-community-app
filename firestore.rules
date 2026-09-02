@@ -19,7 +19,8 @@ service cloud.firestore {
     function isAdmin() { 
       return isSignedIn() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'team')) ||
         hasEmail('jstreet@freeatlast.st') ||
         hasEmail('jstreet@freeatlast.co.uk') ||
         hasEmail('info@freeatlast.co.uk')
@@ -171,12 +172,18 @@ service cloud.firestore {
 
     match /announcements/{announcementId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidAnnouncement(incoming());
+      allow create, update: if isAdmin() && isValidAnnouncement(incoming());
+      allow delete: if isAdmin();
     }
 
     match /activities/{activityId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidActivity(incoming());
+      allow create: if isAdmin() && isValidActivity(incoming());
+      allow update: if (isAdmin() && isValidActivity(incoming())) ||
+                       (isSignedIn() && 
+                        incoming().diff(existing()).affectedKeys().hasOnly(['bookedCount']) && 
+                        incoming().bookedCount is number);
+      allow delete: if isAdmin();
     }
 
     match /assets/{assetId} {
@@ -209,7 +216,7 @@ service cloud.firestore {
     match /bookings/{bookingId} {
       allow create: if isSignedIn() && isValidBooking(incoming());
       allow read: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
       allow update: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
     }
 
@@ -254,7 +261,8 @@ service cloud.firestore {
 
     match /case_study_requests/{requestId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidCaseStudyRequest(incoming());
+      allow create, update: if isAdmin() && isValidCaseStudyRequest(incoming());
+      allow delete: if isAdmin();
     }
 
     match /case_studies/{studyId} {

@@ -996,6 +996,50 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteBooking = async (bookingId: string) => {
+    if (!user) return;
+    try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      const bookingSnap = await getDoc(bookingRef);
+      let participantName = 'Participant';
+      if (bookingSnap.exists()) {
+        const bookingData = bookingSnap.data() as Booking;
+        participantName = bookingData.participantName || 'Participant';
+        
+        // If not already cancelled, decrement bookedCount
+        if (bookingData.status !== 'cancelled' && bookingData.sessionId) {
+          try {
+            const activityRef = doc(db, 'activities', bookingData.sessionId);
+            await updateDoc(activityRef, {
+              bookedCount: increment(-1)
+            });
+          } catch (actErr) {
+            console.warn("Could not decrement activity bookedCount on delete:", actErr);
+          }
+        }
+      }
+      
+      // Delete document completely from Firestore
+      await deleteDoc(bookingRef);
+
+      // Optimistically update local cached registrations
+      setSessionRegistrations(prev => prev.filter(b => b.id !== bookingId));
+      setUserRegistrations(prev => prev.filter(b => b.id !== bookingId));
+      setBookings(prev => prev.filter(id => id !== bookingId));
+
+      setNotification(`Booking record for ${participantName} deleted successfully.`);
+      setTimeout(() => setNotification(null), 3000);
+    } catch (error: any) {
+      console.error("Delete booking error:", error);
+      setNotification(`Failed to delete booking: ${error.message || 'Permission denied'}`);
+      try {
+        handleFirestoreError(error, OperationType.DELETE, `bookings/${bookingId}`);
+      } catch (err) {
+        console.error("Firestore Error logged:", err);
+      }
+    }
+  };
+
   const handleCancelBooking = async (bookingId: string) => {
     if (!user) return;
     try {
@@ -1013,44 +1057,59 @@ const App: React.FC = () => {
       });
 
       // 2. Decrement activity count
-      const activityRef = doc(db, 'activities', bookingData.sessionId);
-      await updateDoc(activityRef, {
-        bookedCount: increment(-1)
-      });
+      if (bookingData.sessionId) {
+        try {
+          const activityRef = doc(db, 'activities', bookingData.sessionId);
+          await updateDoc(activityRef, {
+            bookedCount: increment(-1)
+          });
+        } catch (actErr) {
+          console.warn("Could not decrement activity count:", actErr);
+        }
+      }
 
       // 3. Trigger cancellation email alert
-      await addDoc(collection(db, 'mail'), {
-        to: ['jstreet@freeatlast.co.uk'],
-        replyTo: user.email || 'no-reply@freeatlast.co.uk',
-        message: {
-          subject: `Cancelled Booking: ${bookingData.sessionTitle}`,
-          text: `Booking Cancelled for ${bookingData.sessionTitle}\nParticipant: ${bookingData.participantName}\nDate: ${bookingData.sessionDate}\nTime: ${bookingData.sessionTime}\nCancelled by: ${user.name}\nEmail: ${user.email}`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
-              <h2 style="color: #7e2b33;">Booking Cancelled</h2>
-              <p>A registration has been cancelled for <strong>${bookingData.sessionTitle}</strong>.</p>
-              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-              <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
-                <p style="margin: 5px 0;"><strong>Session:</strong> ${bookingData.sessionTitle}</p>
-                <p style="margin: 5px 0;"><strong>Session Date:</strong> ${bookingData.sessionDate}</p>
-                <p style="margin: 5px 0;"><strong>Session Time:</strong> ${bookingData.sessionTime}</p>
-                <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${bookingData.participantName}</p>
-                <p style="margin: 5px 0;"><strong>Cancelled By:</strong> ${user.name}</p>
-                <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+      try {
+        await addDoc(collection(db, 'mail'), {
+          to: ['jstreet@freeatlast.co.uk'],
+          replyTo: user.email || 'no-reply@freeatlast.co.uk',
+          message: {
+            subject: `Cancelled Booking: ${bookingData.sessionTitle}`,
+            text: `Booking Cancelled for ${bookingData.sessionTitle}\nParticipant: ${bookingData.participantName}\nDate: ${bookingData.sessionDate}\nTime: ${bookingData.sessionTime}\nCancelled by: ${user.name}\nEmail: ${user.email}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+                <h2 style="color: #7e2b33;">Booking Cancelled</h2>
+                <p>A registration has been cancelled for <strong>${bookingData.sessionTitle}</strong>.</p>
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                  <p style="margin: 5px 0;"><strong>Session:</strong> ${bookingData.sessionTitle}</p>
+                  <p style="margin: 5px 0;"><strong>Session Date:</strong> ${bookingData.sessionDate}</p>
+                  <p style="margin: 5px 0;"><strong>Session Time:</strong> ${bookingData.sessionTime}</p>
+                  <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${bookingData.participantName}</p>
+                  <p style="margin: 5px 0;"><strong>Cancelled By:</strong> ${user.name}</p>
+                  <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+                </div>
+                <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                  System generated cancellation alert
+                </p>
               </div>
-              <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                System generated cancellation alert
-              </p>
-            </div>
-          `
-        }
-      });
+            `
+          }
+        });
+      } catch (mailErr) {
+        console.warn("Could not trigger email on cancel:", mailErr);
+      }
 
       setNotification(`Successfully cancelled booking for ${bookingData.participantName}`);
       setTimeout(() => setNotification(null), 3000);
     } catch (error: any) {
       console.error("Cancellation error:", error);
-      setNotification(`Failed to cancel booking: ${error.message}`);
+      setNotification(`Failed to cancel booking: ${error.message || 'Permission denied'}`);
+      try {
+        handleFirestoreError(error, OperationType.UPDATE, `bookings/${bookingId}`);
+      } catch (err) {
+        console.error("Firestore Error logged:", err);
+      }
     }
   };
 
@@ -1336,6 +1395,7 @@ const App: React.FC = () => {
           user={user} 
           onBook={handleBookActivity} 
           onCancel={handleCancelBooking}
+          onDeleteBooking={handleDeleteBooking}
           bookings={bookings} 
           allBookings={user?.role === 'admin' ? sessionRegistrations : userRegistrations}
           assets={assets} 
@@ -1380,6 +1440,7 @@ const App: React.FC = () => {
             impactStories={impactStories}
             inquiries={inquiries}
             bookings={sessionRegistrations}
+            onDeleteBooking={handleDeleteBooking}
             users={allUsers}
             teamLogs={teamLogs}
             wellbeingLogs={wellbeingLogs}

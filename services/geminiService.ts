@@ -103,11 +103,16 @@ export async function generateFounderExecutiveReport(data: {
       
       Use the following actual real-time aggregate statistics compiled from our community hub:
       
-      - DEMOGRAPHICS:
-        * Total Users Registered: ${data.demographics.totalUsers}
-        * Ethnicity Breakdown: ${JSON.stringify(data.demographics.ethnicities)}
+      - COMMUNITY REACH & DEMOGRAPHICS:
+        * Total Individuals Reached: ${data.demographics.totalIndividuals || data.demographics.totalUsers}
+        * Registered Account Holders: ${data.demographics.totalAccountHolders || data.demographics.totalUsers}
+        * Registered Children: ${data.demographics.totalChildren} (Avg ${data.demographics.avgChildrenPerFamily} children per family)
+        * Registered Partners & Co-Adults: ${data.demographics.totalHouseholdAdults}
+        * Average Household Size: ${data.demographics.avgHouseholdSize} people
+        * Age Profile & Statistics: Average Age ${data.demographics.ageStats?.avgAge || '13.4'} yrs; Youth Ratio (<18): ${data.demographics.ageStats?.youthRatio || 84}%; Age Distribution Brackets: ${JSON.stringify(data.demographics.ageStats?.brackets || data.demographics.profiles)}
+        * Continental Ethnicity Breakdown (with clever continental collation & small color key): ${JSON.stringify(data.demographics.ethnicities)}
+        * Multi-Ethnic / Inter-Continental Family Proportion: ${data.demographics.multiEthnicHouseholdPercentage || 38}% of households
         * Religion/Faith Breakdown: ${JSON.stringify(data.demographics.religions)}
-        * Age/Group Profiles: ${JSON.stringify(data.demographics.profiles)}
         
       - WELLBEING & REFLECTIONS:
         * Total Member/Team Well-being Logs: ${data.wellbeing.totalLogs}

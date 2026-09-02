@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
 import { Activity, User } from '../types';
 import { ImageWithFallback } from '../components/ImageWithFallback';
@@ -16,6 +16,7 @@ interface ActivitiesProps {
   user: User | null;
   onBook: (bookingDetail: BookingDetail | BookingDetail[]) => void;
   onCancel?: (bookingId: string) => void;
+  onDeleteBooking?: (bookingId: string) => void;
   bookings: string[];
   assets: any;
   hasConfirmedPhotoPolicy: boolean;
@@ -45,6 +46,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
   user, 
   onBook, 
   onCancel, 
+  onDeleteBooking,
   bookings, 
   assets, 
   hasConfirmedPhotoPolicy, 
@@ -500,6 +502,22 @@ export const Activities: React.FC<ActivitiesProps> = ({
   const myBookings = user ? allBookings.filter(b => b.userId === user.id) : [];
   const sortedMyBookings = [...myBookings].sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime());
 
+  // Detect duplicate bookings in user's registrations
+  const duplicateBookingIds = useMemo(() => {
+    const seen = new Map<string, string>();
+    const duplicates = new Set<string>();
+    myBookings.forEach(b => {
+      if (b.status === 'cancelled') return;
+      const key = `${b.sessionId}_${b.sessionDate}_${(b.participantName || '').toLowerCase().trim()}`;
+      if (seen.has(key)) {
+        duplicates.add(b.id);
+      } else {
+        seen.set(key, b.id);
+      }
+    });
+    return duplicates;
+  }, [myBookings]);
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 animate-fadeIn">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-12">
@@ -550,6 +568,34 @@ export const Activities: React.FC<ActivitiesProps> = ({
             </div>
           </div>
 
+          {duplicateBookingIds.size > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-fadeIn">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <span className="p-2.5 bg-amber-100 text-amber-800 rounded-xl text-lg font-bold">⚠️</span>
+                <div>
+                  <h4 className="text-sm font-black text-amber-950 brand-heading uppercase tracking-wide">
+                    {duplicateBookingIds.size} Duplicate Booking{duplicateBookingIds.size > 1 ? 's' : ''} Found
+                  </h4>
+                  <p className="text-xs text-amber-800 font-normal mt-0.5">
+                    Multiple entries detected for the same participant on the same date/session. You can remove duplicates below.
+                  </p>
+                </div>
+              </div>
+              {onDeleteBooking && (
+                <button
+                  onClick={() => {
+                    if (confirm(`Are you sure you want to delete all ${duplicateBookingIds.size} duplicate booking entries? Only 1 active registration per participant will remain.`)) {
+                      duplicateBookingIds.forEach(id => onDeleteBooking(id));
+                    }
+                  }}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-[10px] font-black uppercase tracking-wider brand-heading shadow transition-all whitespace-nowrap"
+                >
+                  ⚡ Delete All Duplicates
+                </button>
+              )}
+            </div>
+          )}
+
           {sortedMyBookings.length === 0 ? (
             <div className="bg-white rounded-[2.5rem] border border-dashed border-slate-200 py-24 text-center">
               <span className="text-slate-300 block mb-6 text-4xl"><Icons.Calendar /></span>
@@ -582,6 +628,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       const today = new Date();
                       today.setHours(0,0,0,0);
                       const isUpcoming = sessionDateObj >= today;
+                      const isDuplicate = duplicateBookingIds.has(b.id);
                       
                       let statusText = 'Booked';
                       let statusStyle = 'bg-slate-100 text-slate-700 border-slate-200';
@@ -604,7 +651,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       }
 
                       return (
-                        <tr key={b.id} className="hover:bg-slate-50/50 transition-colors">
+                        <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${isDuplicate ? 'bg-amber-50/30' : ''}`}>
                           <td className="px-8 py-6">
                             <p className="text-brand-dark-blue font-black brand-heading text-sm">{b.sessionTitle}</p>
                             <p className="text-[9px] text-slate-400 font-extrabold uppercase mt-1 tracking-wider">ID: {b.id?.slice(-6) || b.sessionId?.slice(-6)}</p>
@@ -614,7 +661,14 @@ export const Activities: React.FC<ActivitiesProps> = ({
                             <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">{b.sessionTime}</p>
                           </td>
                           <td className="px-8 py-6 text-xs font-semibold text-slate-600">
-                            {b.participantName}
+                            <div className="flex items-center gap-2">
+                              <span>{b.participantName}</span>
+                              {isDuplicate && (
+                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                                  Duplicate
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-8 py-6 text-center">
                             <span className={`inline-block px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${statusStyle}`}>
@@ -622,18 +676,40 @@ export const Activities: React.FC<ActivitiesProps> = ({
                             </span>
                           </td>
                           <td className="px-8 py-6 text-right">
-                            {b.status !== 'cancelled' && b.attended === undefined && isUpcoming && onCancel && (
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Are you sure you want to cancel your booking for ${b.sessionTitle}?`)) {
-                                    onCancel(b.id);
-                                  }
-                                }}
-                                className="px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-red-100 hover:scale-105 active:scale-95 brand-heading"
-                              >
-                                Cancel Booking
-                              </button>
-                            )}
+                            <div className="flex items-center justify-end gap-2">
+                              {b.status !== 'cancelled' && b.attended === undefined && isUpcoming && onCancel && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to cancel your booking for ${b.sessionTitle}?`)) {
+                                      onCancel(b.id);
+                                    }
+                                  }}
+                                  className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-red-100 hover:scale-105 active:scale-95 brand-heading"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                              {onDeleteBooking && (
+                                <button
+                                  onClick={() => {
+                                    const confirmMsg = isDuplicate
+                                      ? `Delete duplicate booking record for ${b.participantName}?`
+                                      : `Permanently delete this booking record for ${b.participantName}?`;
+                                    if (confirm(confirmMsg)) {
+                                      onDeleteBooking(b.id);
+                                    }
+                                  }}
+                                  className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border hover:scale-105 active:scale-95 brand-heading ${
+                                    isDuplicate
+                                      ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                                      : 'bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600 border-slate-200 hover:border-red-200'
+                                  }`}
+                                  title="Permanently delete this booking record"
+                                >
+                                  {isDuplicate ? 'Delete Duplicate' : 'Delete'}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
