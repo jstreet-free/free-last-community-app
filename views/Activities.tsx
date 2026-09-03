@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
-import { Activity, User } from '../types';
+import { Activity, User, isActivityBookable, isActivityUpcoming, getActivityDisplayStatus } from '../types';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -57,8 +57,10 @@ export const Activities: React.FC<ActivitiesProps> = ({
   const [filter, setFilter] = useState<'all' | 'youth' | 'community' | 'sports' | 'education'>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [bookingStatusFilter, setBookingStatusFilter] = useState<'all' | 'bookable' | 'not_bookable'>('all');
   const [viewMode, setViewMode] = useState<'explore' | 'history'>('explore');
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [viewingInfoActivity, setViewingInfoActivity] = useState<Activity | null>(null);
   const [bookerMobile, setBookerMobile] = useState<string>('');
   const [participants, setParticipants] = useState<BookingParticipant[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -86,10 +88,11 @@ export const Activities: React.FC<ActivitiesProps> = ({
   };
 
   const getEffectiveSession = (activity: Activity) => {
+    const bookable = isActivityBookable(activity);
     if (activity.frequency !== 'weekly') {
       return { 
         date: activity.date,
-        isBookable: activity.status === 'upcoming' 
+        isBookable: bookable 
       };
     }
 
@@ -105,7 +108,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
     return {
       date: formatLocalDateStr(occurrenceDate),
-      isBookable: true
+      isBookable: bookable
     };
   };
 
@@ -434,10 +437,18 @@ export const Activities: React.FC<ActivitiesProps> = ({
     setSelectedMemberIds([]);
   };
 
-  const upcomingActivities = activities.filter(a => a.status === 'upcoming');
+  const upcomingActivities = activities.filter(a => isActivityUpcoming(a));
+
+  const bookableCount = upcomingActivities.filter(a => isActivityBookable(a)).length;
+  const notBookableCount = upcomingActivities.filter(a => !isActivityBookable(a)).length;
 
   const getCountForDay = (dayId: string) => {
     let baseList = upcomingActivities;
+    if (bookingStatusFilter === 'bookable') {
+      baseList = baseList.filter(a => isActivityBookable(a));
+    } else if (bookingStatusFilter === 'not_bookable') {
+      baseList = baseList.filter(a => !isActivityBookable(a));
+    }
     if (filter !== 'all') {
       baseList = baseList.filter(a => a.category === filter);
     }
@@ -454,6 +465,13 @@ export const Activities: React.FC<ActivitiesProps> = ({
   };
 
   const filteredActivities = upcomingActivities.filter(activity => {
+    // 0. Display Status filter (bookable vs not bookable)
+    if (bookingStatusFilter === 'bookable' && !isActivityBookable(activity)) {
+      return false;
+    }
+    if (bookingStatusFilter === 'not_bookable' && isActivityBookable(activity)) {
+      return false;
+    }
     // 1. Category filter
     if (filter !== 'all' && activity.category !== filter) {
       return false;
@@ -757,18 +775,90 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   )}
                 </div>
 
-                {(filter !== 'all' || selectedDay !== 'all' || searchQuery !== '') && (
+                {(filter !== 'all' || selectedDay !== 'all' || searchQuery !== '' || bookingStatusFilter !== 'all') && (
                   <button
                     onClick={() => {
                       setFilter('all');
                       setSelectedDay('all');
                       setSearchQuery('');
+                      setBookingStatusFilter('all');
                     }}
                     className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-wider brand-heading transition-all whitespace-nowrap shadow-sm"
                   >
                     Reset Filters
                   </button>
                 )}
+              </div>
+            </div>
+
+            {/* Event Display Status Selector */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400 brand-heading uppercase tracking-widest flex items-center gap-1.5">
+                  📌 Display Status (Bookable vs Information)
+                </label>
+                {bookingStatusFilter !== 'all' && (
+                  <button
+                    onClick={() => setBookingStatusFilter('all')}
+                    className="text-[10px] font-bold text-brand-orange brand-heading uppercase hover:underline"
+                  >
+                    Show All
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setBookingStatusFilter('all')}
+                  style={{
+                    backgroundColor: bookingStatusFilter === 'all' ? COLORS.secondary : '#ffffff',
+                    color: bookingStatusFilter === 'all' ? '#ffffff' : COLORS.secondary,
+                    borderColor: bookingStatusFilter === 'all' ? COLORS.secondary : '#e2e8f0'
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold brand-heading transition-all border flex items-center gap-2 ${
+                    bookingStatusFilter === 'all' ? 'shadow-md scale-102 font-extrabold' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <span>All Events</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    bookingStatusFilter === 'all' ? 'bg-white/30 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {upcomingActivities.length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setBookingStatusFilter('bookable')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold brand-heading transition-all border flex items-center gap-2 ${
+                    bookingStatusFilter === 'bookable' 
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-md scale-102 font-extrabold' 
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>Upcoming (Bookable)</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    bookingStatusFilter === 'bookable' ? 'bg-white/30 text-white' : 'bg-emerald-50 text-emerald-700'
+                  }`}>
+                    {bookableCount}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setBookingStatusFilter('not_bookable')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold brand-heading transition-all border flex items-center gap-2 ${
+                    bookingStatusFilter === 'not_bookable' 
+                      ? 'bg-amber-500 text-white border-amber-500 shadow-md scale-102 font-extrabold' 
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>ℹ️</span>
+                  <span>Upcoming (Not Bookable)</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    bookingStatusFilter === 'not_bookable' ? 'bg-white/30 text-white' : 'bg-amber-50 text-amber-800'
+                  }`}>
+                    {notBookableCount}
+                  </span>
+                </button>
               </div>
             </div>
 
@@ -899,6 +989,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
                 const isFull = currentBookedCount >= activity.capacity;
                 const catColor = getCategoryColor(activity.category);
+                const isBookableActivity = isActivityBookable(activity);
 
                 const bookableActivity = {
                   ...activity,
@@ -920,6 +1011,20 @@ export const Activities: React.FC<ActivitiesProps> = ({
                         {activity.category}
                         {activity.frequency === 'weekly' && " • Weekly"}
                       </div>
+
+                      {/* Display Status Badge */}
+                      {isBookableActivity ? (
+                        <div className="absolute top-4 right-4 bg-emerald-600 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg brand-heading border border-emerald-400/30 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                          Upcoming (Bookable)
+                        </div>
+                      ) : (
+                        <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg brand-heading border border-amber-300/40 flex items-center gap-1.5">
+                          <span>ℹ️</span>
+                          Upcoming (Not Bookable)
+                        </div>
+                      )}
+
                       {weekday && (
                         <div className="absolute bottom-4 left-4 bg-slate-900/85 backdrop-blur-md text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest brand-heading border border-white/10">
                           📅 {weekday}s
@@ -928,7 +1033,27 @@ export const Activities: React.FC<ActivitiesProps> = ({
                     </div>
                     
                     <div className="p-8 flex-grow flex flex-col md:w-3/5">
-                      <h3 style={{ color: COLORS.secondary }} className="text-2xl font-bold mb-4 brand-heading">{activity.title}</h3>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${
+                          isBookableActivity 
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                            : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}>
+                          {isBookableActivity ? '🎟️ Upcoming (Bookable)' : '📢 Upcoming (Not Bookable)'}
+                        </span>
+                      </div>
+
+                      <h3 style={{ color: COLORS.secondary }} className="text-2xl font-bold mb-3 brand-heading">{activity.title}</h3>
+
+                      {!isBookableActivity && (
+                        <div className="mb-4 p-3 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-2.5">
+                          <span className="text-amber-700 text-xs mt-0.5">ℹ️</span>
+                          <p className="text-[11px] text-amber-900 leading-snug">
+                            <strong className="font-bold text-amber-950">Information Only:</strong> Shared for community information and awareness. Pre-booking is not required.
+                          </p>
+                        </div>
+                      )}
+
                       <p className="text-gray-500 mb-6 text-sm font-light leading-relaxed h-12 overflow-hidden">{activity.description}</p>
                       
                       <div className="space-y-3 mb-8">
@@ -945,78 +1070,97 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       </div>
 
                   <div className="mt-auto pt-6 border-t border-gray-50 flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-400 brand-heading uppercase tracking-widest">
-                      {activity.capacity - currentBookedCount} spaces left
-                    </span>
-                    {!user ? (
-                      <button 
-                        onClick={() => setActiveTab('login')} 
-                        className="text-[9px] font-bold text-brand-orange uppercase brand-heading hover:underline"
-                      >
-                        Sign in to book
-                      </button>
-                    ) : user.role === 'friend' ? (
-                      <span 
-                        className="text-[9px] font-bold text-slate-400 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-lg uppercase brand-heading"
-                        title="Friends of free@last are supportive sponsors and are not registered to attend member activities."
-                      >
-                        Supporter
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        {isBooked ? (
-                          <div className="flex flex-col items-end gap-1.5">
-                            <div className="flex items-center gap-2">
-                              <span className="bg-green-600 text-white px-3.5 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest brand-heading">
-                                ✓ Booked ({occurrenceUserBookings.length})
-                              </span>
-                              {!isFull && (
-                                <button
-                                  onClick={() => handleOpenBooking(bookableActivity)}
-                                  style={{ backgroundColor: COLORS.orange }}
-                                  className="px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-wider text-white hover:brightness-110 transition-all brand-heading shadow-sm"
-                                  title="Add another family member"
-                                >
-                                  + Add Person
-                                </button>
-                              )}
-                              {onCancel && (
-                                <button
-                                  onClick={() => {
-                                    if (occurrenceUserBookings.length === 1) {
-                                      if (confirm(`Are you sure you want to cancel your booking for ${activity.title}?`)) {
-                                        onCancel(occurrenceUserBookings[0].id);
-                                      }
-                                    } else {
-                                      const names = occurrenceUserBookings.map(b => b.participantName).join('\n- ');
-                                      if (confirm(`Cancel all ${occurrenceUserBookings.length} family bookings for this session?\n\nParticipants:\n- ${names}`)) {
-                                        occurrenceUserBookings.forEach(b => onCancel(b.id));
-                                      }
-                                    }
-                                  }}
-                                  className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 border border-red-100 hover:border-red-200 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all brand-heading"
-                                >
-                                  Cancel
-                                </button>
-                              )}
-                            </div>
-                            <p className="text-[9px] text-slate-400 font-bold truncate max-w-[200px]" title={occurrenceUserBookings.map(b => b.participantName).join(', ')}>
-                              Attending: {occurrenceUserBookings.map(b => b.participantName).join(', ')}
-                            </p>
-                          </div>
-                        ) : (
-                          <button
-                            disabled={isFull}
-                            onClick={() => handleOpenBooking(bookableActivity)}
-                            style={{ backgroundColor: isFull ? '#e2e8f0' : COLORS.orange }}
-                            className={`px-8 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white transition-all shadow-md active:scale-95 brand-heading ${
-                              !isFull ? 'hover:brightness-110' : 'cursor-default text-slate-400'
-                            }`}
+                    {isBookableActivity ? (
+                      <>
+                        <span className="text-[10px] font-bold text-gray-400 brand-heading uppercase tracking-widest">
+                          {activity.capacity - currentBookedCount} spaces left
+                        </span>
+                        {!user ? (
+                          <button 
+                            onClick={() => setActiveTab('login')} 
+                            className="text-[9px] font-bold text-brand-orange uppercase brand-heading hover:underline"
                           >
-                            {isFull ? 'Full' : 'Book Now'}
+                            Sign in to book
                           </button>
+                        ) : user.role === 'friend' ? (
+                          <span 
+                            className="text-[9px] font-bold text-slate-400 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-lg uppercase brand-heading"
+                            title="Friends of free@last are supportive sponsors and are not registered to attend member activities."
+                          >
+                            Supporter
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            {isBooked ? (
+                              <div className="flex flex-col items-end gap-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-green-600 text-white px-3.5 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest brand-heading">
+                                    ✓ Booked ({occurrenceUserBookings.length})
+                                  </span>
+                                  {!isFull && (
+                                    <button
+                                      onClick={() => handleOpenBooking(bookableActivity)}
+                                      style={{ backgroundColor: COLORS.orange }}
+                                      className="px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-wider text-white hover:brightness-110 transition-all brand-heading shadow-sm"
+                                      title="Add another family member"
+                                    >
+                                      + Add Person
+                                    </button>
+                                  )}
+                                  {onCancel && (
+                                    <button
+                                      onClick={() => {
+                                        if (occurrenceUserBookings.length === 1) {
+                                          if (confirm(`Are you sure you want to cancel your booking for ${activity.title}?`)) {
+                                            onCancel(occurrenceUserBookings[0].id);
+                                          }
+                                        } else {
+                                          const names = occurrenceUserBookings.map(b => b.participantName).join('\n- ');
+                                          if (confirm(`Cancel all ${occurrenceUserBookings.length} family bookings for this session?\n\nParticipants:\n- ${names}`)) {
+                                            occurrenceUserBookings.forEach(b => onCancel(b.id));
+                                          }
+                                        }
+                                      }}
+                                      className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 border border-red-100 hover:border-red-200 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all brand-heading"
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                </div>
+                                <p className="text-[9px] text-slate-400 font-bold truncate max-w-[200px]" title={occurrenceUserBookings.map(b => b.participantName).join(', ')}>
+                                  Attending: {occurrenceUserBookings.map(b => b.participantName).join(', ')}
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                disabled={isFull}
+                                onClick={() => handleOpenBooking(bookableActivity)}
+                                style={{ backgroundColor: isFull ? '#e2e8f0' : COLORS.orange }}
+                                className={`px-8 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white transition-all shadow-md active:scale-95 brand-heading ${
+                                  !isFull ? 'hover:brightness-110' : 'cursor-default text-slate-400'
+                                }`}
+                              >
+                                {isFull ? 'Full' : 'Book Now'}
+                              </button>
+                            )}
+                          </div>
                         )}
-                      </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                          <span className="text-[10px] font-bold text-amber-800 brand-heading uppercase tracking-widest">
+                            Information Only • No Booking Required
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setViewingInfoActivity(activity)}
+                          className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                        >
+                          <span>ℹ️ Event Info</span>
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1289,6 +1433,130 @@ export const Activities: React.FC<ActivitiesProps> = ({
             </div>
           );
         })()}
+
+        {viewingInfoActivity && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setViewingInfoActivity(null)}
+              className="fixed inset-0 bg-brand-dark-blue/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col z-10"
+            >
+              <div style={{ backgroundColor: COLORS.secondary }} className="p-8 md:p-10 text-white relative shrink-0">
+                <button 
+                  onClick={() => setViewingInfoActivity(null)}
+                  className="absolute top-8 right-8 text-white/50 hover:text-white transition-colors"
+                  aria-label="Close"
+                >
+                  <Icons.Plus className="rotate-45 h-8 w-8" />
+                </button>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 rounded-lg text-[9px] font-black uppercase tracking-widest brand-heading mb-4">
+                  <span>ℹ️</span> Upcoming (Not Bookable) • Information Only
+                </div>
+                <h2 className="text-2xl md:text-3xl font-black brand-heading uppercase tracking-tight leading-tight mb-2">
+                  {viewingInfoActivity.title}
+                </h2>
+                <p className="text-white/70 text-xs font-light">Community Event Information & Details</p>
+              </div>
+
+              <div className="p-8 md:p-10 space-y-6 overflow-y-auto flex-grow">
+                {/* Notice Banner */}
+                <div className="p-5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3.5">
+                  <span className="p-2 bg-amber-100 text-amber-800 rounded-xl text-lg shrink-0">📢</span>
+                  <div>
+                    <h4 className="text-xs font-black text-amber-950 brand-heading uppercase tracking-wide">
+                      Community Information Session
+                    </h4>
+                    <p className="text-xs text-amber-900 mt-1 leading-relaxed">
+                      This event is shared for information purposes only. You do not need to register or pre-book slots in advance. Simply turn up on the day, or reach out to our team if you have any questions!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Key Details Card */}
+                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex items-center gap-3">
+                    <div style={{ backgroundColor: COLORS.orange }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0">
+                      <Icons.Calendar className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date</p>
+                      <p className="text-brand-dark-blue font-black text-sm brand-heading">
+                        {parseLocalDate(viewingInfoActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div style={{ backgroundColor: COLORS.lightBlue }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0">
+                      <Icons.Clock className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Time</p>
+                      <p className="text-brand-dark-blue font-black text-sm brand-heading">{viewingInfoActivity.time}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 sm:col-span-2">
+                    <div style={{ backgroundColor: COLORS.green }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0">
+                      <Icons.MapPin className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Location</p>
+                      <p className="text-brand-dark-blue font-black text-sm brand-heading">{viewingInfoActivity.location || 'The Hub'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Full Description */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading mb-2">
+                    About This Event
+                  </h4>
+                  <div className="text-sm text-slate-700 leading-relaxed bg-white p-5 rounded-2xl border border-slate-100 whitespace-pre-line font-normal">
+                    {viewingInfoActivity.description}
+                  </div>
+                </div>
+
+                {/* Food / Catering if included */}
+                {viewingInfoActivity.includesFood && (
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3">
+                    <span className="text-2xl">🥗</span>
+                    <div>
+                      <p className="text-xs font-bold text-emerald-950 brand-heading uppercase tracking-wide">Food & Refreshments Provided</p>
+                      <p className="text-xs text-emerald-800 mt-0.5">{viewingInfoActivity.foodOptions || 'Complimentary catering available.'}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewingInfoActivity(null);
+                      setActiveTab('contact');
+                    }}
+                    className="flex-1 py-4 bg-brand-dark-blue hover:brightness-110 text-white rounded-2xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md flex items-center justify-center gap-2"
+                  >
+                    <span>Contact free@last Team</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewingInfoActivity(null)}
+                    className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-xs brand-heading uppercase tracking-widest transition-all"
+                  >
+                    Close Information
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
     </div>
   );

@@ -58,7 +58,7 @@ service cloud.firestore {
         && data.capacity is number
         && data.bookedCount is number
         && data.category in ['youth', 'community', 'sports', 'education']
-        && data.status in ['upcoming', 'past'];
+        && data.status in ['upcoming', 'upcoming_bookable', 'upcoming_not_bookable', 'past'];
     }
 
     function isValidInquiry(data) {

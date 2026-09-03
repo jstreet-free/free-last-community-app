@@ -29,7 +29,7 @@
         "bookedCount": { "type": "number" },
         "category": { "type": "string", "enum": ["youth", "community", "sports", "education"] },
         "flickrAlbumUrl": { "type": "string" },
-        "status": { "type": "string", "enum": ["upcoming", "past"] },
+        "status": { "type": "string", "enum": ["upcoming", "upcoming_bookable", "upcoming_not_bookable", "past"] },
         "imageUrl": { "type": "string" },
         "includesFood": { "type": "boolean" },
         "foodOptions": { "type": "string" }

@@ -225,6 +225,21 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     frequency: 'weekly'
   },
   {
+    id: '5',
+    title: 'Nechells Community Showcase & Open Day',
+    description: 'Join us for our annual community showcase! Featuring live music, youth talent exhibitions, community information stalls, and complimentary refreshments. Open to all families and residents for information — no advance booking required!',
+    date: '2026-09-19',
+    time: '11:00 - 15:00',
+    location: 'Nechells Green & The Hub',
+    capacity: 250,
+    bookedCount: 0,
+    category: 'community',
+    status: 'upcoming_not_bookable',
+    frequency: 'once',
+    includesFood: true,
+    foodOptions: 'Halal BBQ, Vegetarian Curry, Fresh Fruit'
+  },
+  {
     id: 'p1',
     title: 'Easter Youth Arts Festival',
     description: 'A celebration of creativity featuring works from our talented young members.',

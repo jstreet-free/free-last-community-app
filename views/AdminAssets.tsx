@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Icons, COLORS } from '../constants';
 import { ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GripVertical, Check, RefreshCw, ArrowUpDown } from 'lucide-react';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector, getActivityDisplayStatus, isActivityBookable } from '../types';
 import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
@@ -1673,9 +1673,13 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                   {act.category}
                                 </span>
                                 <span className={`inline-block px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider ${
-                                  act.status === 'upcoming' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'
+                                  act.status === 'upcoming_not_bookable' 
+                                    ? 'bg-amber-100 text-amber-800' 
+                                    : act.status === 'upcoming' || act.status === 'upcoming_bookable'
+                                    ? 'bg-green-100 text-green-700' 
+                                    : 'bg-slate-100 text-slate-500'
                                 }`}>
-                                  {act.status}
+                                  {getActivityDisplayStatus(act.status)}
                                 </span>
                               </div>
 
@@ -3489,13 +3493,17 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Display Status</label>
                     <select 
-                      value={editingActivity ? editingActivity.status : newActivity.status}
+                      value={editingActivity ? (editingActivity.status === 'upcoming_not_bookable' ? 'upcoming_not_bookable' : editingActivity.status === 'past' ? 'past' : 'upcoming') : (newActivity.status === 'upcoming_not_bookable' ? 'upcoming_not_bookable' : newActivity.status === 'past' ? 'past' : 'upcoming')}
                       onChange={(e) => editingActivity ? setEditingActivity({...editingActivity, status: e.target.value as any}) : setNewActivity({...newActivity, status: e.target.value as any})}
-                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all font-medium text-slate-700"
                     >
                       <option value="upcoming">Upcoming (Bookable)</option>
+                      <option value="upcoming_not_bookable">Upcoming (Not Bookable)</option>
                       <option value="past">Past (Gallery)</option>
                     </select>
+                    <p className="text-[10px] text-slate-400">
+                      Set to &apos;Upcoming (Not Bookable)&apos; to publish events for community information and awareness without open booking slots.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Flickr Album URL (Optional)</label>
@@ -3609,8 +3617,14 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   )}
                   <div className="flex-grow">
                     <div className="flex items-center gap-4 mb-3">
-                      <span style={{ backgroundColor: act.status === 'upcoming' ? COLORS.green + '20' : COLORS.secondary + '20', color: act.status === 'upcoming' ? COLORS.green : COLORS.secondary }} className="text-[9px] font-bold uppercase tracking-widest px-3 py-1 rounded-lg brand-heading">
-                        {act.status}
+                      <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg brand-heading ${
+                        act.status === 'upcoming_not_bookable'
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : act.status === 'upcoming' || act.status === 'upcoming_bookable'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        {getActivityDisplayStatus(act.status)}
                       </span>
                       <span className="text-[9px] font-bold uppercase tracking-widest bg-slate-100 text-slate-500 px-3 py-1 rounded-lg brand-heading">
                         {act.category}
@@ -3638,21 +3652,30 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </div>
                     <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold brand-heading mb-1">{act.title}</h3>
                     <div className="flex items-center gap-6 mt-2">
-                      <div className="px-3 py-1 bg-brand-orange/5 border border-brand-orange/20 rounded-lg">
-                        <p className="text-[10px] font-bold text-brand-orange uppercase tracking-widest brand-heading">
-                          Booking Status: {(() => {
-                            if (act.frequency !== 'weekly') return act.bookedCount;
-                            
-                            const today = new Date();
-                            today.setHours(0,0,0,0);
-                            let occ = parseLocalDate(act.date);
-                            while (occ < today) occ.setDate(occ.getDate() + 7);
-                            const effectiveDate = formatLocalDateStr(occ);
-                            
-                            return (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === effectiveDate).length;
-                          })()} / {act.capacity} Booked
-                        </p>
-                      </div>
+                      {isActivityBookable(act) ? (
+                        <div className="px-3 py-1 bg-brand-orange/5 border border-brand-orange/20 rounded-lg">
+                          <p className="text-[10px] font-bold text-brand-orange uppercase tracking-widest brand-heading">
+                            Booking Status: {(() => {
+                              if (act.frequency !== 'weekly') return act.bookedCount;
+                              
+                              const today = new Date();
+                              today.setHours(0,0,0,0);
+                              let occ = parseLocalDate(act.date);
+                              while (occ < today) occ.setDate(occ.getDate() + 7);
+                              const effectiveDate = formatLocalDateStr(occ);
+                              
+                              return (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === effectiveDate).length;
+                            })()} / {act.capacity} Booked
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="px-3 py-1 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-1.5">
+                          <span className="text-amber-700 text-xs">ℹ️</span>
+                          <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest brand-heading">
+                            Information Only • No Booking Required
+                          </p>
+                        </div>
+                      )}
                       {act.flickrAlbumUrl && (
                         <div className="flex items-center gap-2 text-[10px] font-black text-brand-light-blue uppercase tracking-widest brand-heading">
                           <Icons.Camera /> Album Linked

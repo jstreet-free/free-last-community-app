@@ -118,6 +118,8 @@ export interface User {
   registeredAt?: string;
 }
 
+export type ActivityStatus = 'upcoming' | 'upcoming_bookable' | 'upcoming_not_bookable' | 'past' | string;
+
 export interface Activity {
   id: string;
   title: string;
@@ -130,11 +132,37 @@ export interface Activity {
   category: 'youth' | 'community' | 'sports' | 'education';
   frequency?: 'once' | 'weekly';
   flickrAlbumUrl?: string;
-  status: 'upcoming' | 'past';
+  status: ActivityStatus;
   imageUrl?: string;
   includesFood?: boolean;
   foodOptions?: string;
 }
+
+export const isActivityBookable = (activity?: { status?: string } | null): boolean => {
+  if (!activity || !activity.status) return true;
+  const s = activity.status.toLowerCase().trim();
+  if (s === 'upcoming_not_bookable' || s.includes('not bookable') || s === 'past') {
+    return false;
+  }
+  return s === 'upcoming' || s === 'upcoming_bookable' || s.includes('bookable');
+};
+
+export const isActivityUpcoming = (activity?: { status?: string } | null): boolean => {
+  if (!activity || !activity.status) return true;
+  const s = activity.status.toLowerCase().trim();
+  if (s === 'past') return false;
+  return s.startsWith('upcoming') || s.includes('bookable') || s.includes('not bookable');
+};
+
+export const getActivityDisplayStatus = (status?: string): 'Upcoming (Bookable)' | 'Upcoming (Not Bookable)' | 'Past' => {
+  if (!status) return 'Upcoming (Bookable)';
+  const s = status.toLowerCase().trim();
+  if (s === 'past') return 'Past';
+  if (s === 'upcoming_not_bookable' || s.includes('not bookable')) {
+    return 'Upcoming (Not Bookable)';
+  }
+  return 'Upcoming (Bookable)';
+};
 
 export interface TeamLog {
   id: string;
