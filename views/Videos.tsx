@@ -4,7 +4,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimest
 import { Icons, COLORS } from '../constants';
 import { User, YouTubeVideo } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
+import { handleFirestoreError, OperationType, isQuotaError } from '../services/firestoreUtils';
 
 interface VideosProps {
   user: User | null;
@@ -40,7 +40,11 @@ export const Videos: React.FC<VideosProps> = ({ user }) => {
       localStorage.setItem('cached_youtube_videos', JSON.stringify(list));
       setLoading(false);
     }, (error) => {
-      console.error("Failed to load videos:", error);
+      if (isQuotaError(error)) {
+        console.warn("YouTube videos snapshot quota exceeded, using local cache");
+      } else {
+        console.error("Failed to load videos:", error);
+      }
       setLoading(false);
       try {
         handleFirestoreError(error, OperationType.GET, path);

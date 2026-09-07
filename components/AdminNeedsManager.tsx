@@ -48,7 +48,10 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 export const AdminNeedsManager: React.FC = () => {
-  const [needs, setNeeds] = useState<FriendNeed[]>([]);
+  const [needs, setNeeds] = useState<FriendNeed[]>(() => {
+    const saved = localStorage.getItem('cached_friend_needs');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [loading, setLoading] = useState(true);
   const [broadcastingId, setBroadcastingId] = useState<string | null>(null);
 
@@ -71,9 +74,15 @@ export const AdminNeedsManager: React.FC = () => {
         list.push({ id: docSnap.id, ...docSnap.data() } as FriendNeed);
       });
       // Sort newest posted needs first
-      setNeeds(list.sort((a, b) => b.date.localeCompare(a.date)));
+      const sorted = list.sort((a, b) => b.date.localeCompare(a.date));
+      setNeeds(sorted);
+      localStorage.setItem('cached_friend_needs', JSON.stringify(sorted));
       setLoading(false);
     }, (error) => {
+      const saved = localStorage.getItem('cached_friend_needs');
+      if (saved) {
+        try { setNeeds(JSON.parse(saved)); } catch {}
+      }
       handleFirestoreError(error, OperationType.GET, path);
       setLoading(false);
     });

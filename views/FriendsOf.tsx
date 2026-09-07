@@ -4,7 +4,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimest
 import { Icons, COLORS } from '../constants';
 import { User, FriendNeed, FriendOffer } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
+import { handleFirestoreError, OperationType, isQuotaError } from '../services/firestoreUtils';
 
 interface FriendsOfProps {
   user: User | null;
@@ -54,7 +54,11 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
       localStorage.setItem('cached_friend_needs', JSON.stringify(sortedNeeds));
       setLoadingNeeds(false);
     }, (error) => {
-      console.error("Failed to load center needs", error);
+      if (isQuotaError(error)) {
+        console.warn("Center needs snapshot quota exceeded, using local cache");
+      } else {
+        console.error("Failed to load center needs", error);
+      }
       setLoadingNeeds(false);
     });
 
@@ -75,7 +79,11 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
       localStorage.setItem('cached_friend_offers', JSON.stringify(sortedOffers));
       setLoadingOffers(false);
     }, (error) => {
-      console.error("Failed to load offers", error);
+      if (isQuotaError(error)) {
+        console.warn("Center offers snapshot quota exceeded, using local cache");
+      } else {
+        console.error("Failed to load offers", error);
+      }
       setLoadingOffers(false);
     });
 

@@ -4,6 +4,7 @@ import { collection, onSnapshot, addDoc, getDocs, deleteDoc, doc, serverTimestam
 import { Icons, COLORS } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
 import { ImageWithFallback } from './ImageWithFallback';
+import { isQuotaError } from '../services/firestoreUtils';
 
 export const AdminNewsletterManager: React.FC = () => {
   const [subscribers, setSubscribers] = useState<any[]>([]);
@@ -35,6 +36,12 @@ export const AdminNewsletterManager: React.FC = () => {
       // Sort newest subscribers first
       list.sort((a,b) => b.subscribedAt ? b.subscribedAt.localeCompare(a.subscribedAt) : 0);
       setSubscribers(list);
+    }, (error) => {
+      if (isQuotaError(error)) {
+        console.warn("Newsletter subscribers snapshot quota exceeded");
+      } else {
+        console.error("Failed to load newsletter subscribers", error);
+      }
     });
 
     // Listen to sent newsletters history
@@ -45,6 +52,13 @@ export const AdminNewsletterManager: React.FC = () => {
       });
       list.sort((a,b) => b.sentAt.localeCompare(a.sentAt));
       setNewsletters(list);
+      setLoading(false);
+    }, (error) => {
+      if (isQuotaError(error)) {
+        console.warn("Newsletters snapshot quota exceeded");
+      } else {
+        console.error("Failed to load newsletters", error);
+      }
       setLoading(false);
     });
 

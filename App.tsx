@@ -16,7 +16,7 @@ import { PhotoPolicyModal } from './components/PhotoPolicyModal';
 import { MemberSupportWidget } from './components/MemberSupportWidget';
 import { MemberProfileEditor } from './components/MemberProfileEditor';
 import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
-import { User, UserRole, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
+import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
 import { db, auth } from './services/firebase';
@@ -32,7 +32,7 @@ import {
   browserLocalPersistence
 } from 'firebase/auth';
 
-import { handleFirestoreError, OperationType } from './services/firestoreUtils';
+import { handleFirestoreError, OperationType, isQuotaError } from './services/firestoreUtils';
 
 export const safeSetStorage = (key: string, value: string) => {
   try {
@@ -87,7 +87,11 @@ const App: React.FC = () => {
               try {
                 await updateDoc(userRef, { role: 'admin', profileComplete: true, status: 'approved' });
               } catch (err) {
-                console.error("Owner upgrade failed to write to Firestore:", err);
+                if (isQuotaError(err)) {
+                  console.warn("Owner status updated locally (cloud quota reached)");
+                } else {
+                  console.error("Owner upgrade failed to write to Firestore:", err);
+                }
               }
             }
 
@@ -97,7 +101,11 @@ const App: React.FC = () => {
               try {
                 await updateDoc(userRef, { profileComplete: true });
               } catch (err) {
-                console.error("Team complete update failed to write to Firestore:", err);
+                if (isQuotaError(err)) {
+                  console.warn("Team status updated locally (cloud quota reached)");
+                } else {
+                  console.error("Team complete update failed to write to Firestore:", err);
+                }
               }
             }
 
@@ -107,7 +115,11 @@ const App: React.FC = () => {
               try {
                 await updateDoc(userRef, { profileComplete: true, status: 'approved' });
               } catch (err) {
-                console.error("Friend complete update failed to write to Firestore:", err);
+                if (isQuotaError(err)) {
+                  console.warn("Friend status updated locally (cloud quota reached)");
+                } else {
+                  console.error("Friend complete update failed to write to Firestore:", err);
+                }
               }
             }
             
@@ -136,7 +148,12 @@ const App: React.FC = () => {
             setUser(defaultUser);
           }
         } catch (error) {
-          console.error("Firestore error in onAuthStateChanged (potentially Quota Exceeded):", error);
+          if (isQuotaError(error)) {
+            console.warn("Firestore daily free read quota reached during auth sync. Operating in local cache mode.");
+            setIsQuotaExceeded(true);
+          } else {
+            console.error("Firestore error in onAuthStateChanged:", error);
+          }
           // Graceful fallback to cached user profile
           const saved = localStorage.getItem('freeatlast_v2_user');
           if (saved) {
@@ -173,25 +190,51 @@ const App: React.FC = () => {
     return localStorage.getItem('freeatlast_photo_policy_confirmed') === 'true';
   });
   
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
+  
   const [assets, setAssets] = useState(() => {
     const saved = localStorage.getItem('cached_assets');
     return saved ? JSON.parse(saved) : DEFAULT_IMAGES;
   });
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
     const saved = localStorage.getItem('cached_announcements');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return SAMPLE_ANNOUNCEMENTS;
   });
   const [activities, setActivities] = useState<Activity[]>(() => {
     const saved = localStorage.getItem('cached_activities');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return SAMPLE_ACTIVITIES;
   });
   const [partners, setPartners] = useState<Partner[]>(() => {
     const saved = localStorage.getItem('cached_partners');
-    return saved ? JSON.parse(saved) : SAMPLE_PARTNERS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return SAMPLE_PARTNERS;
   });
   const [impactStories, setImpactStories] = useState<ImpactStory[]>(() => {
     const saved = localStorage.getItem('cached_impact_stories');
-    return saved ? JSON.parse(saved) : SAMPLE_IMPACT_STORIES;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return SAMPLE_IMPACT_STORIES;
   });
   const [inquiries, setInquiries] = useState<Inquiry[]>(() => {
     const saved = localStorage.getItem('cached_inquiries');
@@ -258,7 +301,16 @@ const App: React.FC = () => {
       setAssets(newAssets);
       safeSetStorage('cached_assets', JSON.stringify(newAssets));
     }, (error) => {
-      console.error("Assets snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Assets snapshot quota reached; using cached/default assets.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_assets');
+        if (saved) {
+          try { setAssets(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Assets snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -271,10 +323,27 @@ const App: React.FC = () => {
       snapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as Announcement);
       });
-      setAnnouncements(items);
-      safeSetStorage('cached_announcements', JSON.stringify(items));
+      const finalItems = items.length > 0 ? items : SAMPLE_ANNOUNCEMENTS;
+      setAnnouncements(finalItems);
+      safeSetStorage('cached_announcements', JSON.stringify(finalItems));
     }, (error) => {
-      console.error("Announcements snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Announcements snapshot quota reached; using cached/sample data.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_announcements');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setAnnouncements(parsed);
+              return;
+            }
+          } catch {}
+        }
+        setAnnouncements(SAMPLE_ANNOUNCEMENTS);
+      } else {
+        console.error("Announcements snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -286,10 +355,27 @@ const App: React.FC = () => {
       snapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as Activity);
       });
-      setActivities(items);
-      safeSetStorage('cached_activities', JSON.stringify(items));
+      const finalItems = items.length > 0 ? items : SAMPLE_ACTIVITIES;
+      setActivities(finalItems);
+      safeSetStorage('cached_activities', JSON.stringify(finalItems));
     }, (error) => {
-      console.error("Activities snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Activities snapshot quota reached; using cached/sample data.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_activities');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setActivities(parsed);
+              return;
+            }
+          } catch {}
+        }
+        setActivities(SAMPLE_ACTIVITIES);
+      } else {
+        console.error("Activities snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -308,7 +394,23 @@ const App: React.FC = () => {
       setPartners(finalItems);
       safeSetStorage('cached_partners', JSON.stringify(finalItems));
     }, (error) => {
-      console.error("Partners snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Partners snapshot quota reached; using cached/sample data.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_partners');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setPartners(parsed);
+              return;
+            }
+          } catch {}
+        }
+        setPartners(SAMPLE_PARTNERS);
+      } else {
+        console.error("Partners snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -325,7 +427,23 @@ const App: React.FC = () => {
       setImpactStories(finalItems);
       safeSetStorage('cached_impact_stories', JSON.stringify(finalItems));
     }, (error) => {
-      console.error("Impact stories snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Impact stories snapshot quota reached; using cached/sample data.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_impact_stories');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setImpactStories(parsed);
+              return;
+            }
+          } catch {}
+        }
+        setImpactStories(SAMPLE_IMPACT_STORIES);
+      } else {
+        console.error("Impact stories snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -355,7 +473,16 @@ const App: React.FC = () => {
       setInquiries(items);
       safeSetStorage('cached_inquiries', JSON.stringify(items));
     }, (error) => {
-      console.error("Inquiries snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Inquiries snapshot quota reached; using cached inquiries.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_inquiries');
+        if (saved) {
+          try { setInquiries(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Inquiries snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role, user?.id]);
@@ -374,7 +501,16 @@ const App: React.FC = () => {
       setSessionRegistrations(items);
       safeSetStorage('cached_session_registrations', JSON.stringify(items));
     }, (error) => {
-      console.error("Session registrations snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Session registrations snapshot quota reached; using cached registrations.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_session_registrations');
+        if (saved) {
+          try { setSessionRegistrations(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Session registrations snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -399,7 +535,20 @@ const App: React.FC = () => {
       setUserRegistrations(fullBookings);
       safeSetStorage('cached_user_registrations', JSON.stringify(fullBookings));
     }, (error) => {
-      console.error("User bookings snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("User bookings snapshot quota reached; using cached registrations.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_user_registrations');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            setUserRegistrations(parsed);
+            setBookings(parsed.map((b: any) => b.sessionId));
+          } catch {}
+        }
+      } else {
+        console.error("User bookings snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.id]);
@@ -415,7 +564,16 @@ const App: React.FC = () => {
       setAllUsers(items);
       safeSetStorage('cached_all_users', JSON.stringify(items));
     }, (error) => {
-      console.error("Users snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Users snapshot quota reached; using cached user list.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_all_users');
+        if (saved) {
+          try { setAllUsers(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Users snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -433,7 +591,16 @@ const App: React.FC = () => {
       setWarnings(items);
       safeSetStorage('cached_warnings', JSON.stringify(items));
     }, (error) => {
-      console.error("Warnings snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Warnings snapshot quota reached; using cached warnings.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_warnings');
+        if (saved) {
+          try { setWarnings(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Warnings snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -462,9 +629,18 @@ const App: React.FC = () => {
       setTeamLogs(items);
       safeSetStorage('cached_team_logs', JSON.stringify(items));
     }, (error) => {
-      console.error("Team logs sync error:", error);
-      if (error.message.includes('index')) {
-        setNotification("System update: Some data might be slow to load while indexes are building.");
+      if (isQuotaError(error)) {
+        console.warn("Team logs snapshot quota reached; using cached team logs.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_team_logs');
+        if (saved) {
+          try { setTeamLogs(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Team logs sync error:", error);
+        if (error.message?.includes('index')) {
+          setNotification("System update: Some data might be slow to load while indexes are building.");
+        }
       }
     });
     return () => unsubscribe();
@@ -493,7 +669,16 @@ const App: React.FC = () => {
       setWellbeingLogs(items);
       safeSetStorage('cached_wellbeing_logs', JSON.stringify(items));
     }, (error) => {
-      console.error("Wellbeing logs sync error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Wellbeing logs snapshot quota reached; using cached wellbeing logs.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_wellbeing_logs');
+        if (saved) {
+          try { setWellbeingLogs(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Wellbeing logs sync error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role, user?.id]);
@@ -509,7 +694,16 @@ const App: React.FC = () => {
       setGalleryAlbums(items);
       safeSetStorage('cached_gallery_albums', JSON.stringify(items));
     }, (error) => {
-      console.error("Gallery albums snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Gallery albums snapshot quota reached; using cached albums.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_gallery_albums');
+        if (saved) {
+          try { setGalleryAlbums(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Gallery albums snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -525,7 +719,16 @@ const App: React.FC = () => {
       setCaseStudyRequests(items);
       safeSetStorage('cached_case_study_requests', JSON.stringify(items));
     }, (error) => {
-      console.error("Case study requests sync error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Case study requests snapshot quota reached; using cached requests.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_case_study_requests');
+        if (saved) {
+          try { setCaseStudyRequests(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Case study requests sync error:", error);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -549,7 +752,16 @@ const App: React.FC = () => {
       setCaseStudies(items);
       safeSetStorage('cached_case_studies', JSON.stringify(items));
     }, (error) => {
-      console.error("Case studies sync error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Case studies snapshot quota reached; using cached case studies.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_case_studies');
+        if (saved) {
+          try { setCaseStudies(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Case studies sync error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role, user?.id]);
@@ -579,6 +791,13 @@ const App: React.FC = () => {
           setUser({ ...updatedData, id: snapshot.id });
         }
       }
+    }, (error) => {
+      if (isQuotaError(error)) {
+        console.warn("User profile snapshot quota reached; running in cached profile mode.");
+        setIsQuotaExceeded(true);
+      } else {
+        console.error("User profile snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.id, user?.status]);
@@ -603,7 +822,16 @@ const App: React.FC = () => {
       setMailLogs(items);
       safeSetStorage('cached_mail_logs', JSON.stringify(items));
     }, (error) => {
-      console.error("Mail logs snapshot error:", error);
+      if (isQuotaError(error)) {
+        console.warn("Mail logs snapshot quota reached; using cached mail logs.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_mail_logs');
+        if (saved) {
+          try { setMailLogs(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Mail logs snapshot error:", error);
+      }
     });
     return () => unsubscribe();
   }, [user?.role]);
@@ -687,11 +915,35 @@ const App: React.FC = () => {
       }
       
       const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
+      let userData: User | null = null;
+      let userDocExists = false;
+
+      try {
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          userData = userSnap.data() as User;
+          userDocExists = true;
+        }
+      } catch (snapErr) {
+        if (isQuotaError(snapErr)) {
+          console.warn("Firestore quota reached reading user in handleLogin; checking cache.");
+          setIsQuotaExceeded(true);
+          const saved = localStorage.getItem('freeatlast_v2_user');
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (parsed.id === uid || parsed.email?.toLowerCase() === email?.toLowerCase()) {
+                userData = parsed;
+                userDocExists = true;
+              }
+            } catch {}
+          }
+        } else {
+          throw snapErr;
+        }
+      }
       
-      if (userSnap.exists()) {
-        const userData = userSnap.data() as User;
-        
+      if (userDocExists && userData) {
         // UPGRADE LOGIC: If a user logs in (or signs up with existing email) and provides a specific role
         // that is more privileged than their current role, we allow upgrade if conditions met.
         // Or simply, if they selected 'admin' or 'team' during signup and are currently 'member' or 'friend', we upgrade.
@@ -730,7 +982,15 @@ const App: React.FC = () => {
               dataConsent: true
             };
           }
-          await updateDoc(userRef, updates);
+          try {
+            await updateDoc(userRef, updates);
+          } catch (upErr) {
+            if (isQuotaError(upErr)) {
+              console.warn("User update saved locally (cloud quota reached)");
+            } else {
+              console.error("Error updating user document:", upErr);
+            }
+          }
         }
 
         const finalUser = { 
@@ -778,8 +1038,17 @@ const App: React.FC = () => {
             isFriendSignup: true
           } as any;
         }
-        await setDoc(userRef, newUser);
+        try {
+          await setDoc(userRef, newUser);
+        } catch (setErr) {
+          if (isQuotaError(setErr)) {
+            console.warn("User creation saved locally (cloud quota reached)");
+          } else {
+            console.error("Error creating user document:", setErr);
+          }
+        }
         setUser(newUser);
+        safeSetStorage('freeatlast_v2_user', JSON.stringify(newUser));
         
         setActiveTab(finalRole === 'admin' ? 'assets' : (finalRole === 'friend' ? 'friends' : 'registration'));
       }
@@ -816,17 +1085,27 @@ const App: React.FC = () => {
       // Members require home visit approval before accessing bookings and photos
       const isFriend = profile.isFriendSignup || false;
       const finalRole = isFriend ? 'friend' : user.role;
-      const newStatus = (user.role === 'admin' || user.status === 'approved') ? 'approved' : (isFriend ? 'approved' : 'pending');
+      const newStatus: UserStatus = (user.role === 'admin' || user.status === 'approved') ? 'approved' : (isFriend ? 'approved' : 'pending');
 
-      await updateDoc(userRef, {
-        name,
-        profile,
-        profileComplete: true,
-        status: newStatus,
-        role: finalRole
-      });
+      try {
+        await updateDoc(userRef, {
+          name,
+          profile,
+          profileComplete: true,
+          status: newStatus,
+          role: finalRole
+        });
+      } catch (upErr) {
+        if (isQuotaError(upErr)) {
+          console.warn("Profile update saved locally (cloud quota reached)");
+        } else {
+          throw upErr;
+        }
+      }
 
-      setUser({ ...user, name, profile, profileComplete: true, status: newStatus, role: finalRole });
+      const updatedUser = { ...user, name, profile, profileComplete: true, status: newStatus, role: finalRole };
+      setUser(updatedUser);
+      safeSetStorage('freeatlast_v2_user', JSON.stringify(updatedUser));
       setActiveTab('home');
       setNotification(
         isFriend 
@@ -986,12 +1265,51 @@ const App: React.FC = () => {
       setNotification(`Registration successful for ${namesJoined}!`);
       setTimeout(() => setNotification(null), 3500);
     } catch (error: any) {
+      if (isQuotaError(error)) {
+        console.warn("Firestore quota reached during booking. Saving registration in local state.");
+        setIsQuotaExceeded(true);
+        const newLocalBookings: Booking[] = detailsList.map((detail, idx) => ({
+          id: `local-bk-${Date.now()}-${idx}`,
+          bookerName: user.name,
+          participantName: detail.participantName,
+          bookerMobile: detail.bookerMobile,
+          bookingDate: new Date().toISOString(),
+          sessionTitle: detail.activity.title,
+          sessionDate: detail.activity.date,
+          sessionTime: detail.activity.time,
+          sessionId: detail.activity.id,
+          userId: user.id,
+          targetEmail: 'jstreet@freeatlast.co.uk',
+          status: 'booked',
+          foodChoice: detail.foodChoice || '',
+          foodConflictConfirmed: detail.foodConflictConfirmed || false,
+          foodConflictWarningRaised: detail.foodConflictConfirmed || false,
+        }));
+        setSessionRegistrations(prev => {
+          const updated = [...newLocalBookings, ...prev];
+          safeSetStorage('cached_session_registrations', JSON.stringify(updated));
+          return updated;
+        });
+        setUserRegistrations(prev => {
+          const updated = [...newLocalBookings, ...prev];
+          safeSetStorage('cached_user_registrations', JSON.stringify(updated));
+          return updated;
+        });
+        setBookings(prev => [...prev, detailsList[0].activity.id]);
+        setActivities(prev => prev.map(a => a.id === detailsList[0].activity.id ? { ...a, bookedCount: (a.bookedCount || 0) + detailsList.length } : a));
+        const namesJoined = detailsList.map(d => d.participantName).join(', ');
+        setNotification(`Registration confirmed locally for ${namesJoined}! (Daily cloud sync quota reached)`);
+        setTimeout(() => setNotification(null), 4000);
+        return;
+      }
       console.error("Booking error:", error);
       setNotification(`Booking failed: ${error.message || "Please check your connection"}`);
       try {
         handleFirestoreError(error, OperationType.WRITE, path);
       } catch (err) {
-        console.error("Firestore Error logged:", err);
+        if (!isQuotaError(err)) {
+          console.error("Firestore Error logged:", err);
+        }
       }
     }
   };
@@ -1023,19 +1341,47 @@ const App: React.FC = () => {
       await deleteDoc(bookingRef);
 
       // Optimistically update local cached registrations
-      setSessionRegistrations(prev => prev.filter(b => b.id !== bookingId));
-      setUserRegistrations(prev => prev.filter(b => b.id !== bookingId));
+      setSessionRegistrations(prev => {
+        const updated = prev.filter(b => b.id !== bookingId);
+        safeSetStorage('cached_session_registrations', JSON.stringify(updated));
+        return updated;
+      });
+      setUserRegistrations(prev => {
+        const updated = prev.filter(b => b.id !== bookingId);
+        safeSetStorage('cached_user_registrations', JSON.stringify(updated));
+        return updated;
+      });
       setBookings(prev => prev.filter(id => id !== bookingId));
 
       setNotification(`Booking record for ${participantName} deleted successfully.`);
       setTimeout(() => setNotification(null), 3000);
     } catch (error: any) {
+      if (isQuotaError(error)) {
+        console.warn("Firestore quota reached during delete. Removing booking locally.");
+        setIsQuotaExceeded(true);
+        setSessionRegistrations(prev => {
+          const updated = prev.filter(b => b.id !== bookingId);
+          safeSetStorage('cached_session_registrations', JSON.stringify(updated));
+          return updated;
+        });
+        setUserRegistrations(prev => {
+          const updated = prev.filter(b => b.id !== bookingId);
+          safeSetStorage('cached_user_registrations', JSON.stringify(updated));
+          return updated;
+        });
+        setBookings(prev => prev.filter(id => id !== bookingId));
+        setNotification("Booking deleted locally (daily cloud quota reached).");
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      }
       console.error("Delete booking error:", error);
       setNotification(`Failed to delete booking: ${error.message || 'Permission denied'}`);
       try {
         handleFirestoreError(error, OperationType.DELETE, `bookings/${bookingId}`);
       } catch (err) {
-        console.error("Firestore Error logged:", err);
+        if (!isQuotaError(err)) {
+          console.error("Firestore Error logged:", err);
+        }
       }
     }
   };
@@ -1103,12 +1449,32 @@ const App: React.FC = () => {
       setNotification(`Successfully cancelled booking for ${bookingData.participantName}`);
       setTimeout(() => setNotification(null), 3000);
     } catch (error: any) {
+      if (isQuotaError(error)) {
+        console.warn("Firestore quota reached during cancellation. Cancelling locally.");
+        setIsQuotaExceeded(true);
+        setSessionRegistrations(prev => {
+          const updated = prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled' as const } : b);
+          safeSetStorage('cached_session_registrations', JSON.stringify(updated));
+          return updated;
+        });
+        setUserRegistrations(prev => {
+          const updated = prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled' as const } : b);
+          safeSetStorage('cached_user_registrations', JSON.stringify(updated));
+          return updated;
+        });
+        setBookings(prev => prev.filter(id => id !== bookingId));
+        setNotification("Booking cancelled locally (daily cloud quota reached).");
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      }
       console.error("Cancellation error:", error);
       setNotification(`Failed to cancel booking: ${error.message || 'Permission denied'}`);
       try {
         handleFirestoreError(error, OperationType.UPDATE, `bookings/${bookingId}`);
       } catch (err) {
-        console.error("Firestore Error logged:", err);
+        if (!isQuotaError(err)) {
+          console.error("Firestore Error logged:", err);
+        }
       }
     }
   };
@@ -1464,6 +1830,23 @@ const App: React.FC = () => {
       setActiveTab={setActiveTab}
       onOpenProfileModal={() => setShowProfileEditor(true)}
     >
+      {isQuotaExceeded && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-900 px-4 py-2.5 text-xs font-semibold flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>
+              <strong>Offline Resilience Mode:</strong> Cloud database daily free limit reached. The hub is safely running using cached data, so you can continue viewing and using the app.
+            </span>
+          </div>
+          <button 
+            onClick={() => setIsQuotaExceeded(false)} 
+            className="text-amber-800 hover:text-amber-950 font-bold ml-4 text-sm px-2 py-0.5 rounded hover:bg-amber-200/50"
+            title="Dismiss notice"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {notification && (
         <div className="fixed top-24 right-8 z-[100] animate-slideIn">
           <div style={{ backgroundColor: COLORS.green }} className="text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border-b-4 border-black/10">

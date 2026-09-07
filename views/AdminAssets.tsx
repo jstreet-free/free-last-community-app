@@ -8,6 +8,7 @@ import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
 import { AdminNeedsManager } from '../components/AdminNeedsManager';
 import { ImageWithFallback } from '../components/ImageWithFallback';
+import { isQuotaError } from '../services/firestoreUtils';
 
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment } from 'firebase/firestore';
@@ -396,6 +397,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
         setNewAnnouncement({ title: '', content: '', category: 'Update', author: 'Management Team' });
       }
     } catch (error) {
+      if (isQuotaError(error)) {
+        console.warn("Announcement save paused due to Firestore quota limit.");
+        alert("Firestore daily free quota reached for today. New updates cannot be saved to cloud right now.");
+        return;
+      }
       console.error("Error saving announcement:", error);
       alert("Failed to save update.");
     }
@@ -417,6 +423,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       await deleteDoc(doc(db, 'announcements', id));
       setDeletingId(null);
     } catch (error: any) {
+      if (isQuotaError(error)) {
+        console.warn("Announcement delete paused due to Firestore quota limit.");
+        alert("Firestore daily free quota reached for today. Cannot delete from cloud right now.");
+        return;
+      }
       console.error("Error deleting announcement:", error);
       alert("Failed to delete update: " + (error.message || "Unknown error"));
     }
@@ -469,6 +480,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
         });
       }
     } catch (error) {
+      if (isQuotaError(error)) {
+        console.warn("Activity save paused due to Firestore quota limit.");
+        alert("Firestore daily free quota reached for today. Cannot save session to cloud right now.");
+        return;
+      }
       console.error("Error saving activity:", error);
       alert("Failed to save session. Please check your connection.");
     }
@@ -490,6 +506,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       await deleteDoc(doc(db, 'activities', id));
       setDeletingId(null);
     } catch (error: any) {
+      if (isQuotaError(error)) {
+        console.warn("Activity delete paused due to Firestore quota limit.");
+        alert("Firestore daily free quota reached for today. Cannot delete from cloud right now.");
+        return;
+      }
       console.error("Error deleting activity:", error);
       alert("Failed to delete session: " + (error.message || "Unknown error"));
     }
