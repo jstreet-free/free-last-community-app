@@ -157,7 +157,11 @@
         "role": { "type": "string", "enum": ["admin", "team", "member"] },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "department": { "type": "string" },
-        "profileComplete": { "type": "boolean" }
+        "profileComplete": { "type": "boolean" },
+        "householdId": { "type": "string" },
+        "householdRole": { "type": "string" },
+        "primaryMemberId": { "type": "string" },
+        "primaryMemberName": { "type": "string" }
       },
       "required": ["email", "role", "status"]
     },

@@ -238,7 +238,7 @@ service cloud.firestore {
                      || (isOwnerEmail() && incoming().role == 'admin' && incoming().status == 'approved')
                    );
       allow update: if (isOwner(userId) && (
-                     incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status', 'photoPolicyAgreed', 'photoPolicyAgreedAt'])
+                     incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status', 'photoPolicyAgreed', 'photoPolicyAgreedAt', 'householdId', 'householdRole', 'primaryMemberId', 'primaryMemberName'])
                      && (
                        // Team/Members can update status but team can't approve themselves
                        (incoming().status == 'pending' || (existing().role == 'member' && incoming().status == 'approved'))

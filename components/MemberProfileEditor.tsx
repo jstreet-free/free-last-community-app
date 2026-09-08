@@ -5,6 +5,7 @@ import * as Icons from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { handleFirestoreError, OperationType } from '../services/firestoreUtils';
+import { getHouseholdInviteCode } from '../services/householdService';
 
 interface MemberProfileEditorProps {
   user: User;
@@ -1082,6 +1083,32 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
             {/* Tab: Adults in Household */}
             {activeTab === 'adults' && (
               <div className="space-y-6 animate-fadeIn">
+                {/* Family Household Linking Info Banner */}
+                <div className="p-6 bg-gradient-to-r from-orange-50 via-slate-50 to-emerald-50 rounded-3xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-brand-orange block">
+                      Family Household Linking
+                    </span>
+                    <h4 className="text-sm font-bold text-brand-dark-blue brand-heading">
+                      Household Code: <span className="font-mono text-base text-brand-orange tracking-widest">{getHouseholdInviteCode(user)}</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 font-light max-w-lg">
+                      Other adults living in your household can register their own individual login account to book activities for the children and connect using this code.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(getHouseholdInviteCode(user));
+                      setSuccessMessage('Household Code copied to clipboard!');
+                      setTimeout(() => setSuccessMessage(null), 3000);
+                    }}
+                    className="px-4 py-2 bg-white border border-slate-200 hover:border-brand-orange text-brand-dark-blue rounded-xl text-xs font-bold uppercase tracking-wider shadow-sm flex items-center gap-1.5 shrink-0"
+                  >
+                    <Icons.Copy className="w-3.5 h-3.5 text-brand-orange" /> Copy Code
+                  </button>
+                </div>
+
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
                     <h3 className="text-xs font-black uppercase tracking-widest text-brand-dark-blue brand-heading flex items-center gap-2">
@@ -1102,6 +1129,7 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
                           relationship: 'Partner / Spouse',
                           mobile: '',
                           email: '',
+                          hasOwnAccount: true,
                         });
                         setEditingAdultIndex(null);
                         setIsAddingAdult(true);
@@ -1126,6 +1154,7 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
                           relationship: 'Partner / Spouse',
                           mobile: '',
                           email: '',
+                          hasOwnAccount: true,
                         });
                         setEditingAdultIndex(null);
                         setIsAddingAdult(true);
@@ -1155,6 +1184,15 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
                             {adult.mobile && <p>📞 {adult.mobile}</p>}
                             {adult.email && <p>✉️ {adult.email}</p>}
                           </div>
+                          {adult.hasOwnAccount ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-[10px] font-bold">
+                              🔗 Individual Account Enabled
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 bg-slate-100 text-slate-600 rounded-md text-[10px]">
+                              Contact Only
+                            </span>
+                          )}
                         </div>
                         <div className="flex gap-2 shrink-0">
                           <button
@@ -1224,7 +1262,7 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
                       </div>
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1">
-                          Mobile Number (Optional)
+                          Mobile Number (For Booking & Emergencies)
                         </label>
                         <input
                           type="tel"
@@ -1236,7 +1274,7 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
                       </div>
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1">
-                          Email Address (Optional)
+                          Email Address (For Booking Account)
                         </label>
                         <input
                           type="email"
@@ -1246,6 +1284,26 @@ export const MemberProfileEditor: React.FC<MemberProfileEditorProps> = ({ user, 
                           onChange={e => setCurrentAdult({ ...currentAdult, email: e.target.value })}
                         />
                       </div>
+                    </div>
+
+                    {/* Individual Account Option */}
+                    <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 w-4 h-4 accent-brand-orange"
+                          checked={currentAdult.hasOwnAccount ?? true}
+                          onChange={e => setCurrentAdult({ ...currentAdult, hasOwnAccount: e.target.checked })}
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-brand-dark-blue block">
+                            Enable individual login account for this adult (linked to this family household)
+                          </span>
+                          <p className="text-slate-500 font-light mt-0.5">
+                            Allows this adult to sign into free@last with their own email to book sessions for the children, while sharing emergency contacts and address.
+                          </p>
+                        </div>
+                      </label>
                     </div>
 
                     <div className="flex justify-end gap-3 pt-2">

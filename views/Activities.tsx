@@ -244,6 +244,19 @@ export const Activities: React.FC<ActivitiesProps> = ({
       });
     }
 
+    if (currentUser.profile?.otherAdults && Array.isArray(currentUser.profile.otherAdults)) {
+      currentUser.profile.otherAdults.forEach((a: any, idx: number) => {
+        if (a.name && !list.some(m => m.name.toLowerCase().trim() === a.name.toLowerCase().trim())) {
+          list.push({
+            id: `adult-${idx}`,
+            name: a.name,
+            roleTag: a.relationship || 'Household Adult',
+            dietaryAllergies: ''
+          });
+        }
+      });
+    }
+
     return list;
   };
 

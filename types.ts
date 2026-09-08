@@ -21,6 +21,10 @@ export interface HouseholdAdult {
   religion?: string;
   dietaryAllergies?: string;
   medicalConditions?: string;
+  hasOwnAccount?: boolean; // Whether this adult has or needs their own individual login linked to household
+  linkedUserId?: string; // If registered, their user ID
+  linkedUserEmail?: string;
+  accountStatus?: 'not_created' | 'linked' | 'invited';
 }
 
 export interface ChildProfile {
@@ -75,6 +79,18 @@ export interface MemberProfile {
   // Other adults living in the house
   otherAdults?: HouseholdAdult[];
   householdAdults?: HouseholdAdult[];
+  householdId?: string; // Household ID grouping family accounts (e.g. house_user123 or FAL-H-XXXXXX)
+  householdRole?: 'primary' | 'adult' | 'teenager';
+  primaryMemberId?: string;
+  primaryMemberName?: string;
+  linkedAdultAccounts?: {
+    userId?: string;
+    email: string;
+    name: string;
+    relationship: string;
+    status: 'linked' | 'invited';
+    linkedAt?: string;
+  }[];
 
   // For Teenager mode
   teenagerDetails?: {
@@ -116,6 +132,10 @@ export interface User {
   status?: UserStatus;
   department?: string;
   registeredAt?: string;
+  householdId?: string;
+  householdRole?: 'primary' | 'adult' | 'teenager';
+  primaryMemberId?: string;
+  primaryMemberName?: string;
 }
 
 export type ActivityStatus = 'upcoming' | 'upcoming_bookable' | 'upcoming_not_bookable' | 'past' | string;

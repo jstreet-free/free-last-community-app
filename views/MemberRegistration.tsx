@@ -4,21 +4,31 @@ import { User, MemberProfile, ChildProfile, HouseholdAdult } from '../types';
 import { Icons, COLORS } from '../constants';
 import { db } from '../services/firebase';
 import { collection, addDoc } from 'firebase/firestore';
+import { getHouseholdId, getHouseholdInviteCode, linkAdultAccount, findHousehold } from '../services/householdService';
 
 interface MemberRegistrationProps {
   user: User;
   onComplete: (profile: MemberProfile) => void;
 }
 
-type Step = 'type' | 'parent' | 'teenager' | 'children' | 'consent';
+type Step = 'type' | 'parent' | 'teenager' | 'children' | 'consent' | 'link_household';
 
 export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, onComplete }) => {
   const [step, setStep] = useState<Step>(user.profile ? 'parent' : 'type');
-  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | 'friend' | 'individual' | null>(() => {
-    return user.profile?.registrationType || null;
+  const [registrationType, setRegistrationType] = useState<'family' | 'teenager' | 'friend' | 'individual' | 'household_adult' | null>(() => {
+    return (user.profile?.registrationType as any) || (user.householdRole === 'adult' ? 'household_adult' : null);
   });
   
   const [isBlocked, setIsBlocked] = useState(false);
+
+  // Household Linking state for adult registration
+  const [householdLookup, setHouseholdLookup] = useState('');
+  const [isSearchingHousehold, setIsSearchingHousehold] = useState(false);
+  const [foundHousehold, setFoundHousehold] = useState<User | null>(null);
+  const [householdLookupError, setHouseholdLookupError] = useState<string | null>(null);
+  const [adultRelationshipToPrimary, setAdultRelationshipToPrimary] = useState('Partner / Spouse');
+  const [adultPersonalMobile, setAdultPersonalMobile] = useState('');
+  const [adultPersonalName, setAdultPersonalName] = useState(user.name || '');
 
   // Parent / Common Info
   const [parentInfo, setParentInfo] = useState({
@@ -42,6 +52,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
     relationship: 'Partner / Spouse',
     mobile: '',
     email: '',
+    hasOwnAccount: true,
   });
   const [editingAdultIndex, setEditingAdultIndex] = useState<number | null>(null);
   const [isAddingAdultFormOpen, setIsAddingAdultFormOpen] = useState(false);
@@ -51,19 +62,27 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       setError("Please enter the adult's full name.");
       return;
     }
+    const adultToSave: HouseholdAdult = {
+      ...currentAdult,
+      hasOwnAccount: currentAdult.hasOwnAccount ?? true,
+      linkedUserEmail: currentAdult.email ? currentAdult.email.trim().toLowerCase() : undefined,
+      accountStatus: currentAdult.email ? 'invited' : undefined
+    };
+
     if (editingAdultIndex !== null) {
       const updated = [...otherAdults];
-      updated[editingAdultIndex] = currentAdult;
+      updated[editingAdultIndex] = adultToSave;
       setOtherAdults(updated);
       setEditingAdultIndex(null);
     } else {
-      setOtherAdults([...otherAdults, currentAdult]);
+      setOtherAdults([...otherAdults, adultToSave]);
     }
     setCurrentAdult({
       name: '',
       relationship: 'Partner / Spouse',
       mobile: '',
       email: '',
+      hasOwnAccount: true,
     });
     setIsAddingAdultFormOpen(false);
     setError(null);
@@ -366,11 +385,62 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         teenagerDetails: teenagerInfo,
         dataConsent
       });
+    } else if (registrationType === 'household_adult') {
+      if (!adultPersonalName.trim()) {
+        setError("Please enter your full name.");
+        return;
+      }
+      if (!foundHousehold) {
+        setError("Please find and link your family household first.");
+        return;
+      }
+      const householdId = getHouseholdId(foundHousehold);
+      const primaryName = foundHousehold.profile?.parentName || foundHousehold.name;
+
+      onComplete({
+        registrationType: 'family',
+        parentName: adultPersonalName.trim(),
+        familyName: foundHousehold.profile?.familyName || '',
+        parentEmail: user.email || '',
+        parentMobile: adultPersonalMobile.trim(),
+        address: foundHousehold.profile?.address || '',
+        postcode: foundHousehold.profile?.postcode || '',
+        livingWith: foundHousehold.profile?.livingWith || '',
+        ethnicity: parentInfo.ethnicity || '',
+        religion: parentInfo.religion || '',
+        householdId,
+        householdRole: 'adult',
+        primaryMemberId: foundHousehold.id,
+        primaryMemberName: primaryName,
+        otherAdults: [{
+          name: adultPersonalName.trim(),
+          relationship: adultRelationshipToPrimary,
+          mobile: adultPersonalMobile.trim(),
+          email: user.email || '',
+          hasOwnAccount: true,
+          linkedUserId: user.id,
+          linkedUserEmail: user.email || '',
+          accountStatus: 'linked'
+        }],
+        householdAdults: [{
+          name: adultPersonalName.trim(),
+          relationship: adultRelationshipToPrimary,
+          mobile: adultPersonalMobile.trim(),
+          email: user.email || '',
+          hasOwnAccount: true,
+          linkedUserId: user.id,
+          linkedUserEmail: user.email || '',
+          accountStatus: 'linked'
+        }],
+        children: foundHousehold.profile?.children || [],
+        dataConsent
+      });
     } else {
       if (children.length === 0) {
         setError("Please add at least one child to your family registration.");
         return;
       }
+      const householdId = getHouseholdId(user);
       onComplete({
         registrationType: 'family',
         parentName: parentInfo.parentName,
@@ -382,11 +452,35 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         livingWith: parentInfo.livingWith,
         ethnicity: parentInfo.ethnicity,
         religion: parentInfo.religion,
+        householdId,
+        householdRole: 'primary',
         otherAdults,
         householdAdults: otherAdults,
         children,
         dataConsent
       });
+    }
+  };
+
+  const handleHouseholdSearch = async () => {
+    if (!householdLookup.trim()) {
+      setHouseholdLookupError("Please enter a Household ID, Invite Code, or email address.");
+      return;
+    }
+    setIsSearchingHousehold(true);
+    setHouseholdLookupError(null);
+    try {
+      const match = await findHousehold(householdLookup.trim());
+      if (match) {
+        setFoundHousehold(match);
+      } else {
+        setFoundHousehold(null);
+        setHouseholdLookupError("No registered household found matching that code or email. Please check with your family member.");
+      }
+    } catch (e: any) {
+      setHouseholdLookupError("Error finding household: " + (e.message || "Please try again."));
+    } finally {
+      setIsSearchingHousehold(false);
     }
   };
 
@@ -406,30 +500,74 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
       case 'type':
         return (
           <div className="space-y-8 animate-fadeIn">
-            <div className="text-center mb-12">
-              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-widest mb-4">Welcome to free@last</h2>
-              <p className="text-gray-500">How would you like to register today?</p>
+            <div className="text-center mb-10">
+              <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-widest mb-3">Welcome to free@last</h2>
+              <p className="text-gray-500 max-w-lg mx-auto text-sm leading-relaxed">
+                Choose the registration option that best describes you today.
+              </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Option 1: Family Registration */}
               <button 
+                type="button"
                 onClick={() => { setRegistrationType('family'); setStep('parent'); }}
-                className="group p-10 bg-white border-4 border-gray-100 rounded-[3rem] hover:border-brand-orange transition-all text-left shadow-xl hover:shadow-2xl active:scale-95"
+                className="group p-8 bg-white border-4 border-gray-100 rounded-[2.5rem] hover:border-brand-orange transition-all text-left shadow-lg hover:shadow-2xl active:scale-95 flex flex-col justify-between"
               >
-                <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mb-6 text-brand-orange group-hover:scale-110 transition-transform">
-                  <Icons.User />
+                <div>
+                  <div className="w-14 h-14 bg-orange-100 rounded-2xl flex items-center justify-center mb-5 text-brand-orange group-hover:scale-110 transition-transform">
+                    <Icons.Users className="w-7 h-7" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-orange block mb-1">Primary Account</span>
+                  <h3 className="text-xl font-bold brand-heading uppercase mb-2 text-brand-dark-blue">Family Registration</h3>
+                  <p className="text-gray-500 text-xs leading-relaxed">
+                    Register yourself as a parent/guardian, add your children, and manage your family household.
+                  </p>
                 </div>
-                <h3 className="text-2xl font-bold brand-heading uppercase mb-2">Family Registration</h3>
-                <p className="text-gray-500 text-sm leading-relaxed">Register yourself as a parent and add your children who will be visiting the centre.</p>
+                <div className="mt-6 pt-4 border-t border-gray-100 flex items-center text-xs font-bold text-brand-orange uppercase tracking-wider">
+                  <span>Start Family Account</span> &rarr;
+                </div>
               </button>
+
+              {/* Option 2: Join Existing Household (Adult) */}
               <button 
-                onClick={() => { setRegistrationType('teenager'); setStep('parent'); }}
-                className="group p-10 bg-white border-4 border-gray-100 rounded-[3rem] hover:border-brand-light-blue transition-all text-left shadow-xl hover:shadow-2xl active:scale-95"
+                type="button"
+                onClick={() => { setRegistrationType('household_adult'); setStep('link_household'); }}
+                className="group p-8 bg-white border-4 border-emerald-100 rounded-[2.5rem] hover:border-emerald-500 transition-all text-left shadow-lg hover:shadow-2xl active:scale-95 flex flex-col justify-between"
               >
-                <div className="w-16 h-16 bg-sky-100 rounded-2xl flex items-center justify-center mb-6 text-brand-light-blue group-hover:scale-110 transition-transform">
-                  <Icons.Activity />
+                <div>
+                  <div className="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center mb-5 text-emerald-600 group-hover:scale-110 transition-transform">
+                    <Icons.UserPlus className="w-7 h-7" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 block mb-1">Household Member</span>
+                  <h3 className="text-xl font-bold brand-heading uppercase mb-2 text-brand-dark-blue">Join Existing Household</h3>
+                  <p className="text-gray-500 text-xs leading-relaxed">
+                    Partner or adult in an already registered household? Link your individual account to your family account to book activities for the kids!
+                  </p>
                 </div>
-                <h3 className="text-2xl font-bold brand-heading uppercase mb-2">Teenager (15+)</h3>
-                <p className="text-gray-500 text-sm leading-relaxed">Register yourself as an individual member (for those aged 15 and over).</p>
+                <div className="mt-6 pt-4 border-t border-emerald-50 flex items-center text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                  <span>Link Your Account</span> &rarr;
+                </div>
+              </button>
+
+              {/* Option 3: Teenager (15+) */}
+              <button 
+                type="button"
+                onClick={() => { setRegistrationType('teenager'); setStep('parent'); }}
+                className="group p-8 bg-white border-4 border-gray-100 rounded-[2.5rem] hover:border-brand-light-blue transition-all text-left shadow-lg hover:shadow-2xl active:scale-95 flex flex-col justify-between"
+              >
+                <div>
+                  <div className="w-14 h-14 bg-sky-100 rounded-2xl flex items-center justify-center mb-5 text-brand-light-blue group-hover:scale-110 transition-transform">
+                    <Icons.Activity className="w-7 h-7" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-light-blue block mb-1">Youth 15+</span>
+                  <h3 className="text-xl font-bold brand-heading uppercase mb-2 text-brand-dark-blue">Teenager (15+)</h3>
+                  <p className="text-gray-500 text-xs leading-relaxed">
+                    Register yourself as an individual youth member (for young people aged 15 and over attending sessions).
+                  </p>
+                </div>
+                <div className="mt-6 pt-4 border-t border-gray-100 flex items-center text-xs font-bold text-brand-light-blue uppercase tracking-wider">
+                  <span>Register Teenager</span> &rarr;
+                </div>
               </button>
             </div>
           </div>
@@ -531,153 +669,333 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
               </div>
             </div>
 
-            {/* Other Adults Living in Household Section */}
-            <div className="pt-6 border-t border-gray-100 space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h4 className="text-lg font-bold brand-heading uppercase tracking-widest text-brand-dark-blue flex items-center gap-2">
-                    <Icons.User className="w-5 h-5 text-brand-orange" />
-                    Other Adults Living in the House ({otherAdults.length})
-                  </h4>
-                  <p className="text-xs text-gray-500 font-light mt-0.5">
-                    Record any additional adults living in the household (e.g. partner, spouse, grandparents, older siblings 18+).
-                  </p>
+            {/* Household & Family Members Section */}
+            {registrationType === 'family' && (
+              <div className="pt-8 border-t-2 border-slate-100 space-y-8">
+                {/* Section Header with BOTH Action Buttons */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-orange-50/60 via-slate-50 to-emerald-50/60 p-6 rounded-3xl border border-slate-200">
+                  <div>
+                    <h4 className="text-lg font-bold brand-heading uppercase tracking-widest text-brand-dark-blue flex items-center gap-2">
+                      <Icons.Users className="w-5 h-5 text-brand-orange" />
+                      Household & Family Members
+                    </h4>
+                    <p className="text-xs text-slate-500 font-light mt-1 max-w-xl">
+                      Add the children who will attend centre activities and sessions, plus any other adults living in the household (who can have their own individual account linked to this family).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError(null);
+                        setStep('children');
+                        setEditingChildIndex(null);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110 active:scale-95 transition-all shadow-md"
+                    >
+                      <Icons.Users className="w-4 h-4" />
+                      Add Child {children.length > 0 && `(${children.length})`}
+                    </button>
+                    {!isAddingAdultFormOpen && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCurrentAdult({
+                            name: '',
+                            relationship: 'Partner / Spouse',
+                            mobile: '',
+                            email: '',
+                            hasOwnAccount: true,
+                          });
+                          setEditingAdultIndex(null);
+                          setIsAddingAdultFormOpen(true);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-brand-orange hover:bg-orange-600 text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110 active:scale-95 transition-all shadow-md"
+                      >
+                        <Icons.UserPlus className="w-4 h-4" />
+                        Add Adult {otherAdults.length > 0 && `(${otherAdults.length})`}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {!isAddingAdultFormOpen && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCurrentAdult({
-                        name: '',
-                        relationship: 'Partner / Spouse',
-                        mobile: '',
-                        email: '',
-                      });
-                      setEditingAdultIndex(null);
-                      setIsAddingAdultFormOpen(true);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-brand-orange text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110 active:scale-95 transition-all shadow-sm"
-                  >
-                    <Icons.Plus className="w-4 h-4" />
-                    Add Adult
-                  </button>
-                )}
-              </div>
 
-              {/* List of Added Adults */}
-              {otherAdults.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {otherAdults.map((adult, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-start justify-between">
-                      <div>
-                        <span className="text-[10px] font-black uppercase tracking-wider text-brand-orange block">
-                          {adult.relationship || 'Household Adult'}
-                        </span>
-                        <h5 className="font-bold text-sm text-brand-dark-blue brand-heading">{adult.name}</h5>
-                        <div className="text-xs text-slate-500 font-mono mt-1 space-y-0.5">
-                          {adult.mobile && <p>📞 {adult.mobile}</p>}
-                          {adult.email && <p>✉️ {adult.email}</p>}
-                        </div>
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleStartEditAdult(idx)}
-                          className="px-2.5 py-1.5 bg-white border border-slate-200 hover:border-brand-orange text-slate-700 rounded-lg text-[9px] font-bold uppercase tracking-wider"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAdult(idx)}
-                          className="px-2.5 py-1.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-500 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Inline Add/Edit Adult Form */}
-              {isAddingAdultFormOpen && (
-                <div className="p-6 bg-white border-2 border-dashed border-brand-orange/40 rounded-3xl space-y-4">
-                  <div className="flex justify-between items-center pb-2 border-b border-gray-100">
-                    <h5 className="text-sm font-bold brand-heading uppercase tracking-wider text-brand-orange">
-                      {editingAdultIndex !== null ? `Edit Adult: ${currentAdult.name}` : 'Add Other Adult Living in Household'}
+                {/* Sub-section 1: Children in Family */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h5 className="text-xs font-black uppercase tracking-widest text-brand-dark-blue flex items-center gap-2">
+                      <span>👶</span> Children in Household ({children.length})
                     </h5>
                     <button
                       type="button"
-                      onClick={() => setIsAddingAdultFormOpen(false)}
-                      className="text-xs text-gray-400 hover:text-gray-600 font-bold uppercase"
+                      onClick={() => {
+                        setError(null);
+                        setStep('children');
+                        setEditingChildIndex(null);
+                      }}
+                      className="text-xs text-emerald-700 hover:text-emerald-800 font-bold uppercase tracking-wider flex items-center gap-1"
                     >
-                      Cancel
+                      <Icons.Plus className="w-3.5 h-3.5" /> Add Another Child
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <InputLabel>Adult's Full Name *</InputLabel>
-                      <input
-                        type="text"
-                        placeholder="e.g. Jane Smith"
-                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
-                        value={currentAdult.name}
-                        onChange={e => setCurrentAdult({ ...currentAdult, name: e.target.value })}
-                      />
+                  {children.length === 0 ? (
+                    <div className="p-6 bg-emerald-50/40 border-2 border-dashed border-emerald-200 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+                      <div className="space-y-1">
+                        <p className="text-xs font-bold text-emerald-900 brand-heading uppercase">No Children Added Yet</p>
+                        <p className="text-xs text-slate-500 font-light">
+                          Please add the children who will attend free@last centre sessions and activity bookings.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError(null);
+                          setStep('children');
+                          setEditingChildIndex(null);
+                        }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow-sm shrink-0"
+                      >
+                        + Add Child
+                      </button>
                     </div>
-                    <div>
-                      <InputLabel>Relationship / Role</InputLabel>
-                      <input
-                        type="text"
-                        placeholder="e.g. Partner, Grandparent, Aunt, Sibling 18+"
-                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
-                        value={currentAdult.relationship}
-                        onChange={e => setCurrentAdult({ ...currentAdult, relationship: e.target.value })}
-                      />
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {children.map((child, idx) => (
+                        <div key={idx} className="p-4 bg-white border-2 border-slate-100 hover:border-slate-200 rounded-2xl flex items-start justify-between shadow-sm">
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 block">
+                              Child • {child.age ? `${child.age} yrs` : 'Age pending'}
+                            </span>
+                            <h5 className="font-bold text-sm text-brand-dark-blue brand-heading">{child.name}</h5>
+                            <p className="text-[11px] text-slate-500 font-light">
+                              {child.schoolCollege || 'School not specified'} • {child.canWalkHome || child.walkHomeOrCollected === 'walk_home' ? '🚶 Walks home' : '🚗 Collected'}
+                            </p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                startEditChild(idx);
+                                setStep('children');
+                              }}
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveChild(idx)}
+                              className="px-2.5 py-1.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-500 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <InputLabel>Mobile Number (Optional)</InputLabel>
-                      <input
-                        type="tel"
-                        placeholder="e.g. 07123 456789"
-                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
-                        value={currentAdult.mobile || ''}
-                        onChange={e => setCurrentAdult({ ...currentAdult, mobile: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <InputLabel>Email Address (Optional)</InputLabel>
-                      <input
-                        type="email"
-                        placeholder="e.g. jane@example.com"
-                        className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
-                        value={currentAdult.email || ''}
-                        onChange={e => setCurrentAdult({ ...currentAdult, email: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingAdultFormOpen(false)}
-                      className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-xs font-bold uppercase"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveAdult}
-                      className="px-6 py-2 bg-brand-orange text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110"
-                    >
-                      {editingAdultIndex !== null ? 'Save Changes' : 'Save Adult'}
-                    </button>
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
+
+                {/* Sub-section 2: Other Adults in Household */}
+                <div className="space-y-4 pt-4 border-t border-slate-100">
+                  <div className="flex justify-between items-center">
+                    <h5 className="text-xs font-black uppercase tracking-widest text-brand-dark-blue flex items-center gap-2">
+                      <span>👤</span> Other Adults Living in Household ({otherAdults.length})
+                    </h5>
+                    {!isAddingAdultFormOpen && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCurrentAdult({
+                            name: '',
+                            relationship: 'Partner / Spouse',
+                            mobile: '',
+                            email: '',
+                            hasOwnAccount: true,
+                          });
+                          setEditingAdultIndex(null);
+                          setIsAddingAdultFormOpen(true);
+                        }}
+                        className="text-xs text-brand-orange hover:text-orange-600 font-bold uppercase tracking-wider flex items-center gap-1"
+                      >
+                        <Icons.Plus className="w-3.5 h-3.5" /> Add Another Adult
+                      </button>
+                    )}
+                  </div>
+
+                  {otherAdults.length === 0 ? (
+                    <div className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+                      <div className="space-y-1">
+                        <p className="text-xs font-bold text-slate-700 brand-heading uppercase">No Additional Adults Added</p>
+                        <p className="text-xs text-slate-500 font-light">
+                          If a partner, spouse, or other adult lives in your home, add them here so they can have their own individual account linked to this family.
+                        </p>
+                      </div>
+                      {!isAddingAdultFormOpen && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentAdult({
+                              name: '',
+                              relationship: 'Partner / Spouse',
+                              mobile: '',
+                              email: '',
+                              hasOwnAccount: true,
+                            });
+                            setEditingAdultIndex(null);
+                            setIsAddingAdultFormOpen(true);
+                          }}
+                          className="px-4 py-2 bg-slate-200 hover:bg-brand-orange hover:text-white text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider shrink-0 transition-all"
+                        >
+                          + Add Adult
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {otherAdults.map((adult, idx) => (
+                        <div key={idx} className="p-4 bg-white border-2 border-slate-100 hover:border-slate-200 rounded-2xl flex items-start justify-between shadow-sm">
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-brand-orange block">
+                              {adult.relationship || 'Household Adult'}
+                            </span>
+                            <h5 className="font-bold text-sm text-brand-dark-blue brand-heading">{adult.name}</h5>
+                            <div className="text-xs text-slate-500 font-mono space-y-0.5">
+                              {adult.mobile && <p>📞 {adult.mobile}</p>}
+                              {adult.email && <p>✉️ {adult.email}</p>}
+                            </div>
+                            {adult.hasOwnAccount ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-[10px] font-bold">
+                                🔗 Individual Account Enabled
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 bg-slate-100 text-slate-600 rounded-md text-[10px]">
+                                Contact Only
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditAdult(idx)}
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-brand-orange hover:text-white text-slate-700 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAdult(idx)}
+                              className="px-2.5 py-1.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-500 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Inline Add/Edit Adult Form */}
+                  {isAddingAdultFormOpen && (
+                    <div className="p-6 bg-white border-2 border-brand-orange/40 rounded-3xl space-y-5 shadow-sm">
+                      <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                        <h5 className="text-sm font-bold brand-heading uppercase tracking-wider text-brand-orange flex items-center gap-2">
+                          <Icons.UserPlus className="w-4 h-4" />
+                          {editingAdultIndex !== null ? `Edit Adult: ${currentAdult.name}` : 'Add Other Adult Living in Household'}
+                        </h5>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingAdultFormOpen(false)}
+                          className="text-xs text-gray-400 hover:text-gray-600 font-bold uppercase"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <InputLabel>Adult's Full Name *</InputLabel>
+                          <input
+                            type="text"
+                            placeholder="e.g. Jane Smith"
+                            className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                            value={currentAdult.name}
+                            onChange={e => setCurrentAdult({ ...currentAdult, name: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <InputLabel>Relationship / Role</InputLabel>
+                          <input
+                            type="text"
+                            placeholder="e.g. Partner, Spouse, Grandparent, Aunt, Sibling 18+"
+                            className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                            value={currentAdult.relationship}
+                            onChange={e => setCurrentAdult({ ...currentAdult, relationship: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <InputLabel>Mobile Number (For Emergency / Booking SMS)</InputLabel>
+                          <input
+                            type="tel"
+                            placeholder="e.g. 07123 456789"
+                            className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                            value={currentAdult.mobile || ''}
+                            onChange={e => setCurrentAdult({ ...currentAdult, mobile: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <InputLabel>Email Address (For Account Login & Booking Notifications)</InputLabel>
+                          <input
+                            type="email"
+                            placeholder="e.g. jane@example.com"
+                            className="w-full p-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-brand-orange outline-none font-bold text-xs"
+                            value={currentAdult.email || ''}
+                            onChange={e => setCurrentAdult({ ...currentAdult, email: e.target.value })}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Individual Account Linking Option */}
+                      <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl">
+                        <label className="flex items-start gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 w-4 h-4 accent-brand-orange"
+                            checked={currentAdult.hasOwnAccount ?? true}
+                            onChange={e => setCurrentAdult({ ...currentAdult, hasOwnAccount: e.target.checked })}
+                          />
+                          <div className="text-xs">
+                            <span className="font-bold text-brand-dark-blue block">
+                              Enable individual login account for this adult (linked to this family household)
+                            </span>
+                            <p className="text-slate-500 font-light mt-0.5">
+                              Allows {currentAdult.name || 'this adult'} to sign into free@last with their own email ({currentAdult.email || 'enter email above'}) to book sessions for themselves or the household's children, while sharing emergency contacts and family address.
+                            </p>
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="flex justify-end gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingAdultFormOpen(false)}
+                          className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-xs font-bold uppercase"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveAdult}
+                          className="px-6 py-2 bg-brand-orange text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider hover:brightness-110 shadow-sm"
+                        >
+                          {editingAdultIndex !== null ? 'Save Changes' : 'Save Adult'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-between pt-8">
               <button type="button" onClick={() => setStep('type')} className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600">Back</button>
@@ -887,7 +1205,66 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
         return (
           <div className="space-y-12 animate-fadeIn">
             <div>
-              <SectionTitle icon={<Icons.Plus />} title="Add Family Members" />
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
+                <SectionTitle icon={<Icons.Plus />} title="Add Family Members" />
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentChild({
+                        name: '',
+                        dob: '',
+                        age: 0,
+                        address: parentInfo.address,
+                        ownMobile: '',
+                        ownEmail: '',
+                        schoolCollege: '',
+                        dietaryAllergies: '',
+                        medicalConditions: '',
+                        medication: '',
+                        canSwim: false,
+                        swimDistance: '',
+                        medicalConsent: false,
+                        mediaConsent: false,
+                        canWalkHome: false,
+                        walkHomeOrCollected: 'collected',
+                        collectionContacts: [
+                          { name: '', mobile: '' },
+                          { name: '', mobile: '' },
+                          { name: '', mobile: '' }
+                        ],
+                        collectionPermissions: ['', '', ''],
+                        ethnicity: '',
+                        religion: '',
+                      });
+                      setEditingChildIndex(null);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider shadow-sm hover:brightness-110 active:scale-95 transition-all"
+                  >
+                    <Icons.Users className="w-4 h-4" />
+                    Add Child
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('parent');
+                      setCurrentAdult({
+                        name: '',
+                        relationship: 'Partner / Spouse',
+                        mobile: '',
+                        email: '',
+                        hasOwnAccount: true,
+                      });
+                      setEditingAdultIndex(null);
+                      setIsAddingAdultFormOpen(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-brand-orange hover:bg-orange-600 text-white rounded-xl text-xs font-bold brand-heading uppercase tracking-wider shadow-sm hover:brightness-110 active:scale-95 transition-all"
+                  >
+                    <Icons.UserPlus className="w-4 h-4" />
+                    Add Adult {otherAdults.length > 0 && `(${otherAdults.length})`}
+                  </button>
+                </div>
+              </div>
               <p className="text-gray-500 mb-8">Please add details for each child who will be attending the centre.</p>
               
               {/* List of added children */}
@@ -1307,6 +1684,183 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
               >
                 Complete Registration
               </button>
+            </div>
+          </div>
+        );
+
+      case 'link_household':
+        return (
+          <div className="space-y-8 animate-fadeIn">
+            <SectionTitle icon={<Icons.UserCheck />} title="Link Account to Family Household" />
+            
+            <div className="p-8 bg-emerald-50/60 border-2 border-emerald-200 rounded-[2.5rem] space-y-6">
+              <div>
+                <h4 className="text-base font-bold brand-heading uppercase text-emerald-900 mb-1">
+                  Connect Your Individual Account
+                </h4>
+                <p className="text-xs text-slate-600 leading-relaxed font-light">
+                  If another adult in your household (e.g. partner, spouse) has already registered a family account with free@last, enter their Family Household Code or their registered email/phone below to connect your account. You will have your own individual login to book activities for the children while sharing family contact records.
+                </p>
+              </div>
+
+              {/* Household Search Bar */}
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  placeholder="Enter Family Household Code (e.g. FAL-H-XXXXXX) or Parent's Email / Phone"
+                  className="flex-1 p-4 bg-white border-2 border-emerald-300 rounded-2xl outline-none font-bold text-xs text-brand-dark-blue focus:border-brand-orange shadow-inner"
+                  value={householdLookup}
+                  onChange={e => {
+                    setHouseholdLookup(e.target.value);
+                    setHouseholdLookupError(null);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleHouseholdSearch();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleHouseholdSearch}
+                  disabled={isSearchingHousehold}
+                  className="px-8 py-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-2xl text-xs font-bold brand-heading uppercase tracking-wider shadow-md hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 shrink-0"
+                >
+                  {isSearchingHousehold ? 'Searching...' : 'Find Household'}
+                </button>
+              </div>
+
+              {householdLookupError && (
+                <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-xs font-medium">
+                  {householdLookupError}
+                </div>
+              )}
+
+              {/* Found Household Card */}
+              {foundHousehold && (
+                <div className="p-6 bg-white border-2 border-emerald-500 rounded-3xl space-y-5 shadow-md animate-fadeIn">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 block">
+                        Household Found
+                      </span>
+                      <h4 className="text-lg font-bold brand-heading uppercase text-brand-dark-blue">
+                        {foundHousehold.profile?.familyName || foundHousehold.name}'s Household
+                      </h4>
+                      <p className="text-xs text-slate-500 font-light mt-0.5">
+                        Primary Account Holder: <strong className="text-slate-800">{foundHousehold.profile?.parentName || foundHousehold.name}</strong>
+                      </p>
+                      <p className="text-xs text-slate-500 font-light">
+                        Address: {foundHousehold.profile?.address}, {foundHousehold.profile?.postcode}
+                      </p>
+                      <p className="text-[11px] font-mono text-emerald-800 font-bold mt-1">
+                        Household Code: {getHouseholdInviteCode(foundHousehold)}
+                      </p>
+                    </div>
+                    <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold">
+                      Verified
+                    </span>
+                  </div>
+
+                  {/* Children in Household */}
+                  {foundHousehold.profile?.children && foundHousehold.profile.children.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                        Children in this household you can book activities for:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {foundHousehold.profile.children.map((child: any, idx: number) => (
+                          <span key={idx} className="px-3 py-1 bg-slate-100 text-brand-dark-blue rounded-xl text-xs font-bold flex items-center gap-1.5">
+                            <Icons.Check className="w-3.5 h-3.5 text-emerald-600" />
+                            {child.name} {child.age ? `(${child.age} yrs)` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Adult Details Entry */}
+                  <div className="pt-4 border-t border-slate-100 space-y-4">
+                    <h5 className="text-xs font-black uppercase tracking-widest text-brand-dark-blue">
+                      Your Individual Account Details
+                    </h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <InputLabel>Your Full Name *</InputLabel>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. John Doe"
+                          className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-emerald-600 outline-none font-bold text-xs"
+                          value={adultPersonalName}
+                          onChange={e => setAdultPersonalName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <InputLabel>Relationship to Household</InputLabel>
+                        <select
+                          className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-emerald-600 outline-none font-bold text-xs"
+                          value={adultRelationshipToPrimary}
+                          onChange={e => setAdultRelationshipToPrimary(e.target.value)}
+                        >
+                          <option value="Partner / Spouse">Partner / Spouse</option>
+                          <option value="Co-Parent">Co-Parent</option>
+                          <option value="Grandparent">Grandparent</option>
+                          <option value="Aunt / Uncle">Aunt / Uncle</option>
+                          <option value="Older Sibling 18+">Older Sibling (18+)</option>
+                          <option value="Other Adult">Other Adult Household Member</option>
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <InputLabel>Your Personal Mobile Number (For Activity Booking Confirmations & Attendance SMS)</InputLabel>
+                        <input
+                          type="tel"
+                          placeholder="e.g. 07123 456789"
+                          className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-emerald-600 outline-none font-bold text-xs"
+                          value={adultPersonalMobile}
+                          onChange={e => setAdultPersonalMobile(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Consent checkbox */}
+                    <div className="pt-2">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 w-5 h-5 accent-emerald-600"
+                          checked={dataConsent}
+                          onChange={e => setDataConsent(e.target.checked)}
+                        />
+                        <span className="text-xs text-slate-600 font-light">
+                          I agree to link my individual account to <strong>{foundHousehold.profile?.familyName || foundHousehold.name}'s Household</strong> and agree to free@last holding this data securely in accordance with GDPR.
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between pt-8">
+              <button
+                type="button"
+                onClick={() => setStep('type')}
+                className="text-gray-400 font-bold brand-heading uppercase tracking-widest hover:text-gray-600"
+              >
+                Back
+              </button>
+              {foundHousehold && (
+                <button
+                  type="submit"
+                  disabled={!dataConsent || !adultPersonalName.trim()}
+                  style={{ backgroundColor: COLORS.secondary }}
+                  className="text-white px-12 py-4 rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all brand-heading uppercase tracking-widest disabled:opacity-50"
+                >
+                  Link Account & Complete Registration
+                </button>
+              )}
             </div>
           </div>
         );
