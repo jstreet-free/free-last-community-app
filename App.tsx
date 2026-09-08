@@ -33,6 +33,7 @@ import {
 } from 'firebase/auth';
 
 import { handleFirestoreError, OperationType, isQuotaError } from './services/firestoreUtils';
+import { recordAppVisit } from './services/analyticsService';
 
 export const safeSetStorage = (key: string, value: string) => {
   try {
@@ -62,10 +63,11 @@ const App: React.FC = () => {
     return localStorage.getItem('freeatlast_v2_active_tab') || 'home';
   });
 
-  // Persist active tab
+  // Persist active tab & track daily app usage
   useEffect(() => {
     safeSetStorage('freeatlast_v2_active_tab', activeTab);
-  }, [activeTab]);
+    recordAppVisit(activeTab, user);
+  }, [activeTab, user]);
 
   // Auth State Listener
   useEffect(() => {

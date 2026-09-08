@@ -7,6 +7,7 @@ import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
 import { AdminNeedsManager } from '../components/AdminNeedsManager';
+import { AdminAppUsageStats } from '../components/AdminAppUsageStats';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { isQuotaError } from '../services/firestoreUtils';
 
@@ -78,8 +79,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   caseStudyRequests = [],
   caseStudies = [],
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs' | 'warnings'>(() => {
-    return (localStorage.getItem('admin_active_tab') as any) || 'activities';
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs' | 'warnings' | 'app-usage'>(() => {
+    return (localStorage.getItem('admin_active_tab') as any) || 'app-usage';
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
@@ -1290,6 +1291,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       {/* Internal Navigation Tabs */}
       <div className="flex flex-wrap gap-4 mb-16 border-b border-gray-100 pb-8">
         {[
+          { id: 'app-usage', label: 'Daily App Usage 📊', icon: <Icons.Activity /> },
           { id: 'activities', label: 'Session Management', icon: <Icons.Calendar /> },
           { id: 'bookings', label: 'Session Bookings', icon: <Icons.Clock /> },
           { id: 'wellbeing', label: 'Wellbeing Monitor', icon: <Icons.Heart /> },
@@ -1323,6 +1325,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           </button>
         ))}
       </div>
+
+      {activeAdminTab === 'app-usage' && (
+        <div className="animate-fadeIn">
+          <AdminAppUsageStats users={users} currentUser={user} />
+        </div>
+      )}
 
       {activeAdminTab === 'wellbeing' && (
         <div className="animate-fadeIn">

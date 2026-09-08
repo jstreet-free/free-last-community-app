@@ -168,6 +168,14 @@ service cloud.firestore {
         && data.addedAt is string;
     }
 
+    function isValidDailyAppStat(data) {
+      return data.keys().hasAll(['date', 'totalVisits', 'uniqueVisitors', 'roleBreakdown'])
+        && data.date is string && data.date.size() <= 20
+        && data.totalVisits is number
+        && data.uniqueVisitors is number
+        && data.roleBreakdown is map;
+    }
+
     // --- Match Rules ---
 
     match /announcements/{announcementId} {
@@ -302,6 +310,12 @@ service cloud.firestore {
     match /warnings/{warningId} {
       allow create: if true;
       allow read, update, delete: if isAdmin();
+    }
+
+    match /app_usage_stats/{statId} {
+      allow read: if isAdmin();
+      allow create, update: if isValidDailyAppStat(incoming());
+      allow delete: if isAdmin();
     }
   }
 }

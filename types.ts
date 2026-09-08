@@ -386,4 +386,31 @@ export interface AdminWarning {
   timestamp: string;
 }
 
+export interface AppVisitSession {
+  timestamp: string;
+  role: UserRole | 'public';
+  userName?: string;
+  userEmail?: string;
+  page: string;
+}
+
+export interface DailyAppStats {
+  id: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD
+  totalVisits: number;
+  uniqueVisitors: number;
+  roleBreakdown: {
+    member: number;
+    team: number;
+    friend: number;
+    admin: number;
+    public: number;
+  };
+  pageViews: {
+    [pageName: string]: number;
+  };
+  recentSessions?: AppVisitSession[];
+  lastActive?: string;
+}
+
 

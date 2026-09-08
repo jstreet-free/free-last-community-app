@@ -314,6 +314,30 @@
         "timestamp": { "type": "string" }
       },
       "required": ["type", "title", "message", "personName", "userEmail", "timestamp"]
+    },
+    "dailyAppStat": {
+      "title": "Daily App Stat",
+      "description": "Daily aggregated application usage, visitor counts, and role breakdown.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "totalVisits": { "type": "number" },
+        "uniqueVisitors": { "type": "number" },
+        "roleBreakdown": {
+          "type": "object",
+          "properties": {
+            "member": { "type": "number" },
+            "team": { "type": "number" },
+            "friend": { "type": "number" },
+            "admin": { "type": "number" },
+            "public": { "type": "number" }
+          }
+        },
+        "pageViews": { "type": "object" },
+        "lastActive": { "type": "string" }
+      },
+      "required": ["date", "totalVisits", "uniqueVisitors", "roleBreakdown"]
     }
   },
   "firestore": {
@@ -392,6 +416,10 @@
     "/warnings/{warningId}": {
       "schema": "warning",
       "description": "Collection of system warnings and member alerts."
+    },
+    "/app_usage_stats/{statId}": {
+      "schema": "dailyAppStat",
+      "description": "Collection of daily app usage analytics, role breakdowns, and visitor counts."
     }
   }
 }
