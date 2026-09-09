@@ -16,6 +16,7 @@ import { PhotoPolicyModal } from './components/PhotoPolicyModal';
 import { MemberSupportWidget } from './components/MemberSupportWidget';
 import { MemberProfileEditor } from './components/MemberProfileEditor';
 import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
+import { LoginPortal } from './components/LoginPortal';
 import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
@@ -1053,7 +1054,9 @@ const App: React.FC = () => {
         safeSetStorage('freeatlast_v2_user', JSON.stringify(newUser));
         
         setActiveTab(finalRole === 'admin' ? 'assets' : (finalRole === 'friend' ? 'friends' : 'registration'));
+        return { success: true };
       }
+      return { success: true };
     } catch (error: any) {
       console.error("Auth error details:", error);
       let msg = "";
@@ -1067,6 +1070,7 @@ const App: React.FC = () => {
       else if (error.code === 'auth/operation-not-allowed') msg = "Login method not enabled in console.";
       else msg = error.message || "Failed to log in.";
       setNotification(msg);
+      return { success: false, error: msg };
     } finally {
       setIsLoggingIn(false);
     }
@@ -1481,248 +1485,16 @@ const App: React.FC = () => {
     }
   };
 
-  const LoginPortal = () => {
-    const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
-    const [role, setRole] = useState<UserRole>('member');
-    const [teamPasscode, setTeamPasscode] = useState('');
-    const [showPasscode, setShowPasscode] = useState(false);
-
-    // Friend simple fields
-    const [friendName, setFriendName] = useState('');
-    const [friendMobile, setFriendMobile] = useState('');
-    const [friendBusinessName, setFriendBusinessName] = useState('');
-
-    const onSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (mode === 'signup') {
-        if (password !== confirmPassword) {
-          setNotification("Passwords do not match. Please ensure both passwords are identical.");
-          return;
-        }
-        if (role === 'team' && teamPasscode !== 'HUB2024') {
-          setNotification("Invalid team access code.");
-          return;
-        }
-        if (role === 'admin' && teamPasscode !== 'ADMIN2024') {
-          setNotification("Invalid admin access code.");
-          return;
-        }
-      }
-      
-      // Handle "username" by appending a domain if it doesn't look like an email
-      let finalEmail = email.trim().toLowerCase();
-      if (!finalEmail.includes('@')) {
-        // Strip all spaces for usernames to ensure valid email format
-        finalEmail = `${finalEmail.replace(/\s/g, '')}@freeatlast.hub`;
-      }
-      
-      handleLogin(role, finalEmail, password, mode === 'signup', {
-        name: friendName,
-        mobile: friendMobile,
-        businessName: friendBusinessName
-      });
-    };
-
-    return (
-      <div className="min-h-[80vh] flex flex-col items-center justify-center p-4 bg-slate-50">
-        <div className="max-w-md w-full bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 text-center relative overflow-hidden">
-          <div style={{ backgroundColor: COLORS.primary }} className="absolute top-0 left-0 right-0 h-3"></div>
-          
-          <Icons.Logo className="mb-8 justify-center h-12" />
-          
-          <h2 style={{ color: COLORS.secondary }} className="text-3xl font-black mb-1 brand-heading uppercase tracking-tight">
-            {mode === 'signin' ? 'Sign In' : 'Create Account'}
-          </h2>
-          <p className="text-slate-400 mb-8 font-bold text-[10px] uppercase tracking-[0.2em] brand-heading">
-            {mode === 'signin' ? (
-              <>Welcome back! Sign in to your account</>
-            ) : (
-              <>Join the hub: Select your role below</>
-            )}
-          </p>
-          
-          <form onSubmit={onSubmit} className="space-y-4 text-left">
-            {mode === 'signup' && (
-              <div className="space-y-3 mb-8">
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">I am joining as a:</label>
-                <div className="flex gap-2 p-1 bg-slate-50 rounded-2xl flex-wrap">
-                  {(['member', 'friend', 'team', 'admin'] as UserRole[]).map(r => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setRole(r)}
-                      className={`flex-1 min-w-[70px] py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all brand-heading ${
-                        role === r ? 'bg-brand-dark-blue text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {mode === 'signup' && role === 'friend' && (
-              <div className="space-y-4 mb-4 animate-slideDown">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Your Name</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. John Smith"
-                    value={friendName}
-                    onChange={(e) => setFriendName(e.target.value)}
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 placeholder:text-slate-300"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Mobile Number</label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="e.g. 07123456789"
-                    value={friendMobile}
-                    onChange={(e) => setFriendMobile(e.target.value)}
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 placeholder:text-slate-300"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Business Name (Optional)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Deloitte"
-                    value={friendBusinessName}
-                    onChange={(e) => setFriendBusinessName(e.target.value)}
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 placeholder:text-slate-300"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Username or Email</label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"><Icons.Mail /></span>
-                <input 
-                  type="text"
-                  required
-                  placeholder="e.g. johnsmith or john@example.com"
-                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 transition-all placeholder:text-slate-300"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-center px-2">
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Password</label>
-                {mode === 'signin' && (
-                  <button 
-                    type="button"
-                    onClick={() => handleForgotPassword(email)}
-                    className="text-[9px] font-bold text-brand-orange hover:underline uppercase tracking-widest brand-heading"
-                  >
-                    Forgot Password?
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"><Icons.Key /></span>
-                <input 
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  placeholder="••••••••"
-                  className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 transition-all placeholder:text-slate-300"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-                <button 
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
-                >
-                  {showPassword ? <Icons.EyeOff /> : <Icons.Eye />}
-                </button>
-              </div>
-            </div>
-
-            {mode === 'signup' && (
-              <div className="space-y-2 animate-slideDown">
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">Confirm Password</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"><Icons.Key /></span>
-                  <input 
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    placeholder="••••••••"
-                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-brand-orange outline-none font-bold text-slate-700 transition-all placeholder:text-slate-300"
-                    value={confirmPassword}
-                    onChange={e => setConfirmPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {mode === 'signup' && (role === 'team' || role === 'admin') && (
-              <div className="space-y-2 animate-slideDown">
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-2">
-                  {role === 'admin' ? 'Admin Access Code' : 'Team Access Code'}
-                </label>
-                <div className="relative">
-                  <input 
-                    type={showPasscode ? 'text' : 'password'}
-                    required
-                    placeholder={`Enter ${role} code`}
-                    className="w-full px-6 pr-12 py-4 bg-orange-50 border-2 border-orange-100 rounded-2xl focus:border-brand-orange outline-none font-bold text-brand-dark-blue transition-all"
-                    value={teamPasscode}
-                    onChange={e => setTeamPasscode(e.target.value)}
-                  />
-                  <button 
-                    type="button"
-                    onClick={() => setShowPasscode(!showPasscode)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-brand-orange/40 hover:text-brand-orange transition-colors"
-                  >
-                    {showPasscode ? <Icons.EyeOff /> : <Icons.Eye />}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <button 
-              type="submit"
-              disabled={isLoggingIn}
-              style={{ backgroundColor: COLORS.orange }}
-              className="w-full text-white font-black py-5 rounded-2xl transition-all shadow-xl active:scale-95 hover:opacity-90 text-lg brand-heading uppercase tracking-widest disabled:opacity-50 mt-6"
-            >
-              {isLoggingIn ? 'Connecting...' : (mode === 'signin' ? 'Sign In' : 'Create Account')}
-            </button>
-          </form>
-
-          <div className="mt-8 pt-8 border-t border-slate-50 flex flex-col gap-4">
-            <button 
-              onClick={() => {
-                setMode(mode === 'signin' ? 'signup' : 'signin');
-                setPassword('');
-                setConfirmPassword('');
-              }}
-              className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-brand-orange transition-colors brand-heading"
-            >
-              {mode === 'signin' ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const renderContent = () => {
     if (activeTab === 'login') {
-      return <LoginPortal />;
+      return (
+        <LoginPortal 
+          onLogin={handleLogin}
+          onForgotPassword={handleForgotPassword}
+          isLoggingIn={isLoggingIn}
+          onBackHome={() => setActiveTab('home')}
+        />
+      );
     }
 
     if (user && !user.profileComplete && user.role !== 'admin' && user.role !== 'friend') {
@@ -1736,8 +1508,11 @@ const App: React.FC = () => {
       return <MemberRegistration user={user} onComplete={handleCompleteRegistration} />;
     }
 
-    // Friend access restriction: Friends have access to home, photos (gallery), wellbeing, and responding on friends page
-    if (user?.role === 'friend' && activeTab !== 'home' && activeTab !== 'gallery' && activeTab !== 'friends' && activeTab !== 'wellbeing') {
+    // Friend access: Friends have access to home, gallery, friends, wellbeing, videos, partners, and activities (information-only)
+    if (
+      user?.role === 'friend' &&
+      !['home', 'gallery', 'friends', 'wellbeing', 'videos', 'partners', 'activities'].includes(activeTab)
+    ) {
       return <FriendsOf user={user} setActiveTab={setActiveTab} />;
     }
 

@@ -17,8 +17,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
   const navItems = isFriend
     ? [
         { id: 'home', label: 'Home', icon: <div className="font-bold text-lg">@</div>, mobileLabel: 'Home' },
+        { id: 'activities', label: 'Activities', icon: <Icons.Calendar />, mobileLabel: 'Activities' },
         { id: 'gallery', label: 'Photos', icon: <Icons.Camera />, mobileLabel: 'Photos' },
         { id: 'friends', label: 'Friends of', icon: <Icons.Shield />, mobileLabel: 'Friends' },
+        { id: 'videos', label: 'Videos', icon: <Icons.Play />, mobileLabel: 'Videos' },
+        { id: 'partners', label: 'Partners', icon: <Icons.Briefcase />, mobileLabel: 'Partners' },
+        ...(user ? [{ id: 'wellbeing', label: 'My Wellbeing', icon: <Icons.Heart />, mobileLabel: 'Wellbeing' }] : []),
       ]
     : [
         { id: 'home', label: 'Home', icon: <div className="font-bold text-lg">@</div>, mobileLabel: 'Home' },
@@ -107,18 +111,18 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, active
 
       {/* Mobile Nav - Using Brand Palette */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-brand-dark-blue border-t border-white/10 z-50 shadow-2xl">
-        <div className="flex items-center justify-around px-2 py-2">
+        <div className="flex items-center justify-around px-2 py-2 overflow-x-auto no-scrollbar gap-1">
           {navItems.map((item) => (
             <button 
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               style={{ color: activeTab === item.id ? COLORS.primary : 'rgba(255,255,255,0.5)' }}
-              className="flex flex-col items-center flex-1 py-1 transition-all"
+              className="flex flex-col items-center flex-1 min-w-[50px] py-1 transition-all shrink-0"
             >
               <div className={`p-1.5 rounded-xl ${activeTab === item.id ? 'bg-white/10' : ''}`}>
                  {item.icon}
               </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest mt-1 brand-heading">
+              <span className="text-[8px] font-bold uppercase tracking-wider mt-1 brand-heading whitespace-nowrap">
                 {item.mobileLabel}
               </span>
             </button>

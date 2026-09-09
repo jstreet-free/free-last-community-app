@@ -261,6 +261,11 @@ export const Activities: React.FC<ActivitiesProps> = ({
   };
 
   const handleOpenBooking = (activity: Activity) => {
+    if (user?.role === 'friend') {
+      setViewingInfoActivity(activity);
+      return;
+    }
+
     let defaultFood = '';
     if (activity.includesFood && activity.foodOptions) {
       const options = activity.foodOptions.split(',').map(s => s.trim());
@@ -551,14 +556,39 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 animate-fadeIn">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-12">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-10">
         <div>
-          <h1 style={{ color: COLORS.secondary }} className="text-5xl font-bold mb-4 brand-heading uppercase tracking-tight">Session Booking</h1>
-          <p className="text-gray-500 text-lg font-light">Explore and join our weekly community activities at the Nechells Hub.</p>
+          <h1 style={{ color: COLORS.secondary }} className="text-4xl sm:text-5xl font-bold mb-3 brand-heading uppercase tracking-tight">
+            {user?.role === 'friend' ? 'Our Activities & Programmes' : 'Session Booking'}
+          </h1>
+          <p className="text-gray-500 text-base sm:text-lg font-light">
+            {user?.role === 'friend' 
+              ? 'Explore our weekly community programmes, youth clubs, sports, and educational sessions at the Nechells Hub.' 
+              : 'Explore and join our weekly community activities at the Nechells Hub.'}
+          </p>
         </div>
       </div>
 
-      {user && (
+      {user?.role === 'friend' && (
+        <div className="mb-10 p-6 bg-gradient-to-r from-blue-50/80 via-slate-50 to-orange-50/80 border border-slate-200 rounded-3xl flex items-start sm:items-center gap-4 shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-2xl shadow-sm shrink-0">
+            🤝
+          </div>
+          <div className="space-y-1">
+            <span className="text-[9px] font-black uppercase tracking-wider text-brand-orange block brand-heading">
+              Friend of free@last • Community Programme Showcase
+            </span>
+            <h3 className="text-sm sm:text-base font-bold text-brand-dark-blue brand-heading">
+              Information Only • Discover What We Do in Nechells
+            </h3>
+            <p className="text-xs text-slate-600 font-light leading-relaxed max-w-3xl">
+              As a Friend of free@last, this view lets you see the variety of sessions and youth clubs we run across the community. All activities here are displayed for informational purposes. Booking onto sessions is reserved for our registered families and youth members. Click <strong>Session Details</strong> on any card to view timings, locations, and descriptions.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {user && user.role !== 'friend' && (
         <div className="flex gap-6 mb-12 border-b border-gray-100 pb-4">
           <button 
             onClick={() => setViewMode('explore')}
@@ -1026,7 +1056,12 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       </div>
 
                       {/* Display Status Badge */}
-                      {isBookableActivity ? (
+                      {user?.role === 'friend' ? (
+                        <div className="absolute top-4 right-4 bg-slate-900/80 backdrop-blur-md text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg brand-heading border border-white/10 flex items-center gap-1.5">
+                          <span>ℹ️</span>
+                          Information Only
+                        </div>
+                      ) : isBookableActivity ? (
                         <div className="absolute top-4 right-4 bg-emerald-600 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg brand-heading border border-emerald-400/30 flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
                           Upcoming (Bookable)
@@ -1048,17 +1083,21 @@ export const Activities: React.FC<ActivitiesProps> = ({
                     <div className="p-8 flex-grow flex flex-col md:w-3/5">
                       <div className="flex items-center gap-2 mb-2">
                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${
-                          isBookableActivity 
+                          user?.role === 'friend'
+                            ? 'bg-blue-50 text-brand-dark-blue border border-blue-200'
+                            : isBookableActivity 
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
                             : 'bg-amber-50 text-amber-800 border border-amber-200'
                         }`}>
-                          {isBookableActivity ? '🎟️ Upcoming (Bookable)' : '📢 Upcoming (Not Bookable)'}
+                          {user?.role === 'friend' 
+                            ? 'ℹ️ Information Only' 
+                            : isBookableActivity ? '🎟️ Upcoming (Bookable)' : '📢 Upcoming (Not Bookable)'}
                         </span>
                       </div>
 
                       <h3 style={{ color: COLORS.secondary }} className="text-2xl font-bold mb-3 brand-heading">{activity.title}</h3>
 
-                      {!isBookableActivity && (
+                      {!isBookableActivity && user?.role !== 'friend' && (
                         <div className="mb-4 p-3 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-2.5">
                           <span className="text-amber-700 text-xs mt-0.5">ℹ️</span>
                           <p className="text-[11px] text-amber-900 leading-snug">
@@ -1083,7 +1122,22 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       </div>
 
                   <div className="mt-auto pt-6 border-t border-gray-50 flex items-center justify-between">
-                    {isBookableActivity ? (
+                    {user?.role === 'friend' ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-brand-orange"></span>
+                          <span className="text-[10px] font-bold text-slate-500 brand-heading uppercase tracking-widest">
+                            Information Only • Programme Showcase
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setViewingInfoActivity(activity)}
+                          className="px-5 py-2.5 bg-brand-dark-blue hover:brightness-110 text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                        >
+                          <span>ℹ️ Session Details</span>
+                        </button>
+                      </>
+                    ) : isBookableActivity ? (
                       <>
                         <span className="text-[10px] font-bold text-gray-400 brand-heading uppercase tracking-widest">
                           {activity.capacity - currentBookedCount} spaces left
@@ -1095,13 +1149,6 @@ export const Activities: React.FC<ActivitiesProps> = ({
                           >
                             Sign in to book
                           </button>
-                        ) : user.role === 'friend' ? (
-                          <span 
-                            className="text-[9px] font-bold text-slate-400 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-lg uppercase brand-heading"
-                            title="Friends of free@last are supportive sponsors and are not registered to attend member activities."
-                          >
-                            Supporter
-                          </span>
                         ) : (
                           <div className="flex items-center gap-2">
                             {isBooked ? (
@@ -1471,12 +1518,14 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   <Icons.Plus className="rotate-45 h-8 w-8" />
                 </button>
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 rounded-lg text-[9px] font-black uppercase tracking-widest brand-heading mb-4">
-                  <span>ℹ️</span> Upcoming (Not Bookable) • Information Only
+                  <span>ℹ️</span> {user?.role === 'friend' ? 'Friend of free@last • Information Only' : 'Upcoming (Not Bookable) • Information Only'}
                 </div>
                 <h2 className="text-2xl md:text-3xl font-black brand-heading uppercase tracking-tight leading-tight mb-2">
                   {viewingInfoActivity.title}
                 </h2>
-                <p className="text-white/70 text-xs font-light">Community Event Information & Details</p>
+                <p className="text-white/70 text-xs font-light">
+                  {user?.role === 'friend' ? 'Community Programme Information & Overview' : 'Community Event Information & Details'}
+                </p>
               </div>
 
               <div className="p-8 md:p-10 space-y-6 overflow-y-auto flex-grow">
@@ -1485,10 +1534,12 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   <span className="p-2 bg-amber-100 text-amber-800 rounded-xl text-lg shrink-0">📢</span>
                   <div>
                     <h4 className="text-xs font-black text-amber-950 brand-heading uppercase tracking-wide">
-                      Community Information Session
+                      {user?.role === 'friend' ? 'Information Only for Friends of free@last' : 'Community Information Session'}
                     </h4>
                     <p className="text-xs text-amber-900 mt-1 leading-relaxed">
-                      This event is shared for information purposes only. You do not need to register or pre-book slots in advance. Simply turn up on the day, or reach out to our team if you have any questions!
+                      {user?.role === 'friend'
+                        ? 'As a valued Friend of free@last, this session overview demonstrates how our programmes support local youth and families in Nechells. Member booking is reserved for registered young people and family households.'
+                        : 'This event is shared for information purposes only. You do not need to register or pre-book slots in advance. Simply turn up on the day, or reach out to our team if you have any questions!'}
                     </p>
                   </div>
                 </div>
