@@ -342,6 +342,27 @@
         "lastActive": { "type": "string" }
       },
       "required": ["date", "totalVisits", "uniqueVisitors", "roleBreakdown"]
+    },
+    "signupAttempt": {
+      "title": "Signup Attempt",
+      "description": "Log of user registration attempts, errors, and manual admin overrides.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["member", "team", "friend", "admin"] },
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "businessName": { "type": "string" },
+        "attemptedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["failed", "resolved", "orphaned_auth"] },
+        "errorCode": { "type": "string" },
+        "errorMessage": { "type": "string" },
+        "resolvedAt": { "type": "string" },
+        "resolvedBy": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["email", "attemptedAt", "status"]
     }
   },
   "firestore": {
@@ -424,6 +445,10 @@
     "/app_usage_stats/{statId}": {
       "schema": "dailyAppStat",
       "description": "Collection of daily app usage analytics, role breakdowns, and visitor counts."
+    },
+    "/signup_attempts/{attemptId}": {
+      "schema": "signupAttempt",
+      "description": "Collection of failed and incomplete signup diagnostics and issues."
     }
   }
 }

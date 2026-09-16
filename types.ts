@@ -138,6 +138,22 @@ export interface User {
   primaryMemberName?: string;
 }
 
+export interface SignupAttempt {
+  id: string;
+  email: string;
+  role: UserRole;
+  name?: string;
+  mobile?: string;
+  businessName?: string;
+  attemptedAt: string;
+  status: 'failed' | 'resolved' | 'orphaned_auth';
+  errorCode?: string;
+  errorMessage?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  notes?: string;
+}
+
 export type ActivityStatus = 'upcoming' | 'upcoming_bookable' | 'upcoming_not_bookable' | 'past' | string;
 
 export interface Activity {

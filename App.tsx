@@ -17,11 +17,11 @@ import { MemberSupportWidget } from './components/MemberSupportWidget';
 import { MemberProfileEditor } from './components/MemberProfileEditor';
 import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
 import { LoginPortal } from './components/LoginPortal';
-import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy } from './types';
+import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy, SignupAttempt } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
 import { db, auth } from './services/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc, where, increment } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc, getDocs, where, increment } from 'firebase/firestore';
 import { 
   signInAnonymously, 
   signOut, 
@@ -35,6 +35,7 @@ import {
 
 import { handleFirestoreError, OperationType, isQuotaError } from './services/firestoreUtils';
 import { recordAppVisit } from './services/analyticsService';
+import { logSignupAttempt } from './services/adminAuthService';
 
 export const safeSetStorage = (key: string, value: string) => {
   try {
@@ -281,6 +282,10 @@ const App: React.FC = () => {
   });
   const [caseStudies, setCaseStudies] = useState<CaseStudy[]>(() => {
     const saved = localStorage.getItem('cached_case_studies');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [signupAttempts, setSignupAttempts] = useState<SignupAttempt[]>(() => {
+    const saved = localStorage.getItem('cached_signup_attempts');
     return saved ? JSON.parse(saved) : [];
   });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -576,6 +581,32 @@ const App: React.FC = () => {
         }
       } else {
         console.error("Users snapshot error:", error);
+      }
+    });
+    return () => unsubscribe();
+  }, [user?.role]);
+
+  // Sync signup attempts from Firestore (Admin only)
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    const unsubscribe = onSnapshot(collection(db, 'signup_attempts'), (snapshot) => {
+      const items: SignupAttempt[] = [];
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as SignupAttempt);
+      });
+      items.sort((a, b) => new Date(b.attemptedAt || 0).getTime() - new Date(a.attemptedAt || 0).getTime());
+      setSignupAttempts(items);
+      safeSetStorage('cached_signup_attempts', JSON.stringify(items));
+    }, (error) => {
+      if (isQuotaError(error)) {
+        console.warn("Signup attempts snapshot quota reached; using cached list.");
+        setIsQuotaExceeded(true);
+        const saved = localStorage.getItem('cached_signup_attempts');
+        if (saved) {
+          try { setSignupAttempts(JSON.parse(saved)); } catch {}
+        }
+      } else {
+        console.error("Signup attempts snapshot error:", error);
       }
     });
     return () => unsubscribe();
@@ -899,12 +930,42 @@ const App: React.FC = () => {
                 const signInResult = await signInWithEmailAndPassword(auth, email, password);
                 uid = signInResult.user.uid;
               } catch (signInError: any) {
+                // Log failed signup attempt so admin can see, diagnose, and override
+                try {
+                  await logSignupAttempt({
+                    email,
+                    role,
+                    name: extraFields?.name,
+                    mobile: extraFields?.mobile,
+                    businessName: extraFields?.businessName,
+                    errorCode: 'auth/email-already-in-use',
+                    errorMessage: 'Email already exists in Firebase Auth. Password entered does not match existing credentials.',
+                    notes: 'User attempted signup with an email that is already registered.'
+                  });
+                } catch (logErr) {
+                  console.warn("Failed to log signup attempt:", logErr);
+                }
+
                 // Throw custom error to show meaningful instruction instead of "Incorrect password" during SignUp
-                const customError = new Error("This email is already registered. If you are trying to sign up or log in, please enter your correct existing password, or go back to the 'Sign In' page and click 'Forgot Password' to reset it.");
+                const customError = new Error("This email is already registered. If you already have an account, click 'Send Password Reset Link' or switch to Sign In. If you are having trouble, the admin can assist you via the manual override facility.");
                 (customError as any).code = 'auth/email-already-in-use-wrong-password';
                 throw customError;
               }
             } else {
+              try {
+                await logSignupAttempt({
+                  email,
+                  role,
+                  name: extraFields?.name,
+                  mobile: extraFields?.mobile,
+                  businessName: extraFields?.businessName,
+                  errorCode: signUpError.code || 'unknown_signup_error',
+                  errorMessage: signUpError.message || 'Signup failed',
+                  notes: 'User encountered error during registration'
+                });
+              } catch (logErr) {
+                console.warn("Failed to log signup attempt:", logErr);
+              }
               throw signUpError;
             }
           }
@@ -926,6 +987,30 @@ const App: React.FC = () => {
         if (userSnap.exists()) {
           userData = userSnap.data() as User;
           userDocExists = true;
+        } else if (email) {
+          // Check if an admin pre-created/overrode this user's profile under an ID matching this email
+          try {
+            const qUsers = query(collection(db, 'users'), where('email', '==', email.trim().toLowerCase()));
+            const userQuerySnap = await getDocs(qUsers);
+            if (!userQuerySnap.empty) {
+              const foundDoc = userQuerySnap.docs[0];
+              const preData = foundDoc.data() as User;
+              // Migrate document to matching Auth UID
+              await setDoc(userRef, {
+                ...preData,
+                id: uid,
+                email: email.trim().toLowerCase(),
+                updatedAt: serverTimestamp()
+              }, { merge: true });
+              if (foundDoc.id !== uid) {
+                await deleteDoc(doc(db, 'users', foundDoc.id));
+              }
+              userData = { ...preData, id: uid, email: email.trim().toLowerCase() };
+              userDocExists = true;
+            }
+          } catch (migrateErr) {
+            console.warn("Could not query pre-created user doc:", migrateErr);
+          }
         }
       } catch (snapErr) {
         if (isQuotaError(snapErr)) {
@@ -1592,6 +1677,8 @@ const App: React.FC = () => {
             warnings={warnings}
             caseStudyRequests={caseStudyRequests}
             caseStudies={caseStudies}
+            signupAttempts={signupAttempts}
+            onNotification={(msg) => setNotification(msg)}
           />
         ) : <Home user={user} assets={assets} announcements={announcements} setActiveTab={setActiveTab} caseStudyRequests={caseStudyRequests} caseStudies={caseStudies} />;
       default:

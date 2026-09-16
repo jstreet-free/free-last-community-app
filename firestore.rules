@@ -231,12 +231,13 @@ service cloud.firestore {
     match /users/{userId} {
       // PII Protection: only owner or admin can read details
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow create: if isOwner(userId) && isValidUser(incoming()) 
+      allow create: if (isOwner(userId) && isValidUser(incoming()) 
                    && (
                      ((incoming().role == 'member' || incoming().role == 'team') && incoming().status == 'pending')
                      || (incoming().role == 'friend' && incoming().status == 'approved')
                      || (isOwnerEmail() && incoming().role == 'admin' && incoming().status == 'approved')
-                   );
+                   ))
+                   || (isAdmin() && isValidUser(incoming()));
       allow update: if (isOwner(userId) && (
                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status', 'photoPolicyAgreed', 'photoPolicyAgreedAt', 'householdId', 'householdRole', 'primaryMemberId', 'primaryMemberName'])
                      && (
@@ -316,6 +317,11 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create, update: if isValidDailyAppStat(incoming());
       allow delete: if isAdmin();
+    }
+
+    match /signup_attempts/{attemptId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
   }
 }

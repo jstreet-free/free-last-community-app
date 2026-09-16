@@ -2,12 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { Icons, COLORS } from '../constants';
 import { ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GripVertical, Check, RefreshCw, ArrowUpDown } from 'lucide-react';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector, getActivityDisplayStatus, isActivityBookable } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector, getActivityDisplayStatus, isActivityBookable, SignupAttempt } from '../types';
 import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
 import { AdminNeedsManager } from '../components/AdminNeedsManager';
 import { AdminAppUsageStats } from '../components/AdminAppUsageStats';
+import { AdminAccountOverrideModal } from '../components/AdminAccountOverrideModal';
+import { FailedSignupsManager } from '../components/FailedSignupsManager';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { isQuotaError } from '../services/firestoreUtils';
 
@@ -34,6 +36,8 @@ interface AdminAssetsProps {
   warnings?: any[];
   caseStudyRequests?: CaseStudyRequest[];
   caseStudies?: CaseStudy[];
+  signupAttempts?: SignupAttempt[];
+  onNotification?: (msg: string) => void;
 }
 
 const parseLocalDate = (dateStr: string): Date => {
@@ -78,6 +82,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   warnings = [],
   caseStudyRequests = [],
   caseStudies = [],
+  signupAttempts = [],
+  onNotification,
 }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs' | 'warnings' | 'app-usage'>(() => {
     return (localStorage.getItem('admin_active_tab') as any) || 'app-usage';
@@ -164,7 +170,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   });
 
   const [userSearchQuery, setUserSearchQuery] = useState('');
-  const [activeUserSubTab, setActiveUserSubTab] = useState<'member' | 'team' | 'friend' | 'admin' | 'all'>('member');
+  const [activeUserSubTab, setActiveUserSubTab] = useState<'member' | 'team' | 'friend' | 'admin' | 'all' | 'failed'>('member');
+  const [isAccountOverrideModalOpen, setIsAccountOverrideModalOpen] = useState(false);
+  const [selectedSignupAttemptForOverride, setSelectedSignupAttemptForOverride] = useState<Partial<SignupAttempt> | null>(null);
   const [selectedUserDetail, setSelectedUserDetail] = useState<User | null>(null);
   const [uniqueNumInput, setUniqueNumInput] = useState('');
   const [editStatus, setEditStatus] = useState<UserStatus>('pending');
@@ -1425,9 +1433,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   link.click();
                   document.body.removeChild(link);
                 }}
-                className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold text-xs brand-heading uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center gap-2"
+                className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold text-xs brand-heading uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center gap-2 whitespace-nowrap"
               >
                 <Icons.Camera /> Export CSV
+              </button>
+              <button 
+                onClick={() => {
+                  setSelectedSignupAttemptForOverride(null);
+                  setIsAccountOverrideModalOpen(true);
+                }}
+                className="px-6 py-4 bg-brand-orange hover:brightness-110 text-white rounded-2xl font-black text-xs brand-heading uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-brand-orange/20 whitespace-nowrap"
+              >
+                ⚡ Create / Override Account
               </button>
             </div>
           </div>
@@ -1439,16 +1456,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               { id: 'team', label: 'Team Members' },
               { id: 'friend', label: 'Friends Of' },
               { id: 'admin', label: 'Admins' },
+              { id: 'failed', label: '⚠️ Failed Sign-ups' },
               { id: 'all', label: 'All Signups' }
             ].map(tab => {
               const count = tab.id === 'all' 
                 ? users.length 
-                : tab.id === 'friend'
-                  ? users.filter(u => isFriendUser(u)).length
-                  : tab.id === 'member'
-                    ? users.filter(u => isMemberUser(u)).length
-                    : users.filter(u => u.role === tab.id).length;
+                : tab.id === 'failed'
+                  ? (signupAttempts || []).filter(a => a.status !== 'resolved').length
+                  : tab.id === 'friend'
+                    ? users.filter(u => isFriendUser(u)).length
+                    : tab.id === 'member'
+                      ? users.filter(u => isMemberUser(u)).length
+                      : users.filter(u => u.role === tab.id).length;
               const isActive = activeUserSubTab === tab.id;
+              const isFailedWithIssues = tab.id === 'failed' && count > 0;
               return (
                 <button
                   key={tab.id}
@@ -1461,7 +1482,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 >
                   {tab.label}
                   <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                    isActive ? 'bg-brand-orange/15 text-brand-orange' : 'bg-slate-200 text-slate-600'
+                    isFailedWithIssues
+                      ? 'bg-rose-500 text-white font-black animate-pulse'
+                      : isActive ? 'bg-brand-orange/15 text-brand-orange' : 'bg-slate-200 text-slate-600'
                   }`}>
                     {count}
                   </span>
@@ -1470,6 +1493,21 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             })}
           </div>
 
+          {activeUserSubTab === 'failed' ? (
+            <FailedSignupsManager
+              signupAttempts={signupAttempts || []}
+              onOpenOverrideModal={(data) => {
+                setSelectedSignupAttemptForOverride(data || null);
+                setIsAccountOverrideModalOpen(true);
+              }}
+              onNotification={(msg) => {
+                if (onNotification) onNotification(msg);
+                else alert(msg);
+              }}
+              adminEmail={user.email || 'admin@freeatlast.st'}
+              existingUsers={users}
+            />
+          ) : (
           <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-xl overflow-hidden overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
@@ -1569,6 +1607,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
       {activeAdminTab === 'bookings' && (
@@ -4982,6 +5021,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           <AdminNeedsManager />
         </div>
       )}
+
+      {/* Manual Admin Override / Account Creation Modal */}
+      <AdminAccountOverrideModal
+        isOpen={isAccountOverrideModalOpen}
+        onClose={() => {
+          setIsAccountOverrideModalOpen(false);
+          setSelectedSignupAttemptForOverride(null);
+        }}
+        onSuccess={(msg) => {
+          if (onNotification) onNotification(msg);
+        }}
+        adminEmail={user.email || 'admin@freeatlast.st'}
+        initialData={selectedSignupAttemptForOverride}
+      />
     </div>
   );
 };

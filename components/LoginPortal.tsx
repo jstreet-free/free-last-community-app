@@ -271,8 +271,36 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
             <div className="flex-1">
               <p className="font-bold">{errorMessage}</p>
               <p className="text-[10px] text-red-500 mt-1">
-                Your entered details have been saved below. Please adjust the highlighted field to proceed.
+                Your entered details have been preserved below. Please adjust the highlighted field to proceed.
               </p>
+              {errorMessage.toLowerCase().includes('already') && (
+                <div className="mt-3 pt-2.5 border-t border-red-200/80 flex flex-wrap gap-2 items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (email.trim()) {
+                        onForgotPassword(email.trim().toLowerCase());
+                        setErrorMessage(`Password reset instructions have been dispatched to ${email.trim()}. Please check your inbox.`);
+                      } else {
+                        setErrorMessage("Please enter your email address to reset password.");
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-brand-orange text-white rounded-lg font-bold text-[10px] uppercase tracking-wider brand-heading hover:opacity-90 shadow-sm transition-all"
+                  >
+                    🔑 Send Password Reset Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('signin');
+                      setErrorMessage(null);
+                    }}
+                    className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-[10px] uppercase tracking-wider brand-heading transition-all"
+                  >
+                    Go to Sign In
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
