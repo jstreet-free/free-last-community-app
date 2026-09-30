@@ -172,6 +172,7 @@ export interface Activity {
   imageUrl?: string;
   includesFood?: boolean;
   foodOptions?: string;
+  sessionBookings?: { [dateStr: string]: number };
 }
 
 export const isActivityBookable = (activity?: { status?: string } | null): boolean => {

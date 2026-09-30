@@ -14,7 +14,7 @@ import { ImageWithFallback } from '../components/ImageWithFallback';
 import { isQuotaError } from '../services/firestoreUtils';
 
 import { db } from '../services/firebase';
-import { doc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment } from 'firebase/firestore';
 
 interface AdminAssetsProps {
   user: User;
@@ -183,9 +183,20 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   // Bookings Organization States
   const [activeBookingView, setActiveBookingView] = useState<'by-activity' | 'all-log'>('by-activity');
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [selectedSessionDateFilter, setSelectedSessionDateFilter] = useState<string>('all');
   const [bookingTimeframeFilter, setBookingTimeframeFilter] = useState<'all' | 'week' | 'month' | 'year'>('all');
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
   const [activitySearchQuery, setActivitySearchQuery] = useState('');
+
+  // Weekly Session Registers & Attendance modal states
+  const [selectedWeeklyRegisterActivity, setSelectedWeeklyRegisterActivity] = useState<ActivityType | null>(null);
+  const [selectedWeeklyRegisterDate, setSelectedWeeklyRegisterDate] = useState<string>('all');
+  const [isManualBookingModalOpen, setIsManualBookingModalOpen] = useState(false);
+  const [manualBookingParticipant, setManualBookingParticipant] = useState('');
+  const [manualBookingBooker, setManualBookingBooker] = useState('');
+  const [manualBookingMobile, setManualBookingMobile] = useState('');
+  const [manualBookingDietary, setManualBookingDietary] = useState('');
+  const [isSubmittingManualBooking, setIsSubmittingManualBooking] = useState(false);
 
   // Mail Monitor & Management States
   const [mailFilter, setMailFilter] = useState<'all' | 'pending' | 'resolved' | 'error'>('all');
@@ -1234,6 +1245,120 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  const getWeeklySessionOccurrences = (act: ActivityType): { dateStr: string; displayDate: string; isPast: boolean; isToday: boolean; isNext: boolean }[] => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = formatLocalDateStr(today);
+
+    if (act.frequency !== 'weekly') {
+      const d = parseLocalDate(act.date);
+      d.setHours(0, 0, 0, 0);
+      return [{
+        dateStr: act.date,
+        displayDate: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
+        isPast: d < today,
+        isToday: formatLocalDateStr(d) === todayStr,
+        isNext: d >= today
+      }];
+    }
+
+    const bookedDates = new Set<string>();
+    (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate).forEach(b => bookedDates.add(b.sessionDate));
+    if (act.sessionBookings) {
+      Object.keys(act.sessionBookings).forEach(d => bookedDates.add(d));
+    }
+
+    const generatedDates = new Set<string>();
+    let base = parseLocalDate(act.date);
+    base.setHours(0, 0, 0, 0);
+
+    let cur = new Date(base);
+    while (cur >= today) {
+      cur.setDate(cur.getDate() - 7);
+    }
+    cur.setDate(cur.getDate() - 28); // 4 weeks back
+    for (let i = 0; i < 16; i++) { // 4 past weeks + next 12 weeks
+      generatedDates.add(formatLocalDateStr(cur));
+      cur.setDate(cur.getDate() + 7);
+    }
+
+    const allDates = Array.from(new Set([...bookedDates, ...generatedDates]));
+    allDates.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    let nextFound = false;
+    return allDates.map(dateStr => {
+      const d = parseLocalDate(dateStr);
+      d.setHours(0, 0, 0, 0);
+      const isPast = d < today;
+      const isToday = dateStr === todayStr;
+      const isNext = !isPast && !nextFound;
+      if (isNext) nextFound = true;
+      return {
+        dateStr,
+        displayDate: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
+        isPast,
+        isToday,
+        isNext
+      };
+    });
+  };
+
+  const handleCreateManualBooking = async (activity: ActivityType, sessionDate: string) => {
+    if (!manualBookingParticipant.trim()) {
+      alert("Please enter the participant's name.");
+      return;
+    }
+    try {
+      setIsSubmittingManualBooking(true);
+      const newBookingData = {
+        bookerName: manualBookingBooker.trim() || user.name || 'Staff Registered',
+        participantName: manualBookingParticipant.trim(),
+        bookerMobile: manualBookingMobile.trim(),
+        bookingDate: serverTimestamp(),
+        sessionTitle: activity.title,
+        sessionDate: sessionDate,
+        sessionTime: activity.time,
+        sessionId: activity.id,
+        userId: user.id,
+        targetEmail: 'jstreet@freeatlast.co.uk',
+        status: 'booked' as const,
+        foodChoice: manualBookingDietary.trim(),
+        foodConflictConfirmed: false,
+        foodConflictWarningRaised: false,
+      };
+
+      await addDoc(collection(db, 'bookings'), newBookingData);
+
+      try {
+        const actRef = doc(db, 'activities', activity.id);
+        const actSnap = await getDoc(actRef);
+        if (actSnap.exists()) {
+          const actData = actSnap.data() as ActivityType;
+          const currentCounts = actData.sessionBookings || {};
+          const currentForDate = currentCounts[sessionDate] ?? 0;
+          await updateDoc(actRef, {
+            bookedCount: increment(1),
+            [`sessionBookings.${sessionDate}`]: currentForDate + 1
+          });
+        }
+      } catch (actErr) {
+        console.warn("Could not update activity count:", actErr);
+      }
+
+      alert(`Successfully registered ${manualBookingParticipant} for ${sessionDate}!`);
+      setManualBookingParticipant('');
+      setManualBookingBooker('');
+      setManualBookingMobile('');
+      setManualBookingDietary('');
+      setIsManualBookingModalOpen(false);
+    } catch (e: any) {
+      console.error("Error creating manual booking:", e);
+      alert("Failed to create booking: " + (e.message || "Unknown error"));
+    } finally {
+      setIsSubmittingManualBooking(false);
+    }
+  };
+
   const filteredUsers = users.filter(u => {
     const q = userSearchQuery.toLowerCase();
     if (!q) return true;
@@ -1809,23 +1934,32 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
             ) : (
               /* 2. Detailed Recording Table for Selected Activity */
               (() => {
-                const selectedActivity = activities.find(a => a.id === selectedActivityId) || {
+                const selectedActivity: ActivityType = activities.find(a => a.id === selectedActivityId) || {
                   id: selectedActivityId,
                   title: bookings.find(b => b.sessionId === selectedActivityId)?.sessionTitle || "Unknown Session",
                   date: bookings.find(b => b.sessionId === selectedActivityId)?.sessionDate || "",
                   time: bookings.find(b => b.sessionId === selectedActivityId)?.sessionTime || "",
                   location: 'N/A',
                   capacity: 0,
+                  bookedCount: bookings.filter(b => b.sessionId === selectedActivityId).length,
                   category: 'community' as const,
                   status: 'past' as const,
+                  frequency: 'once' as const,
                   description: 'Historical registration recording'
                 };
 
                 const allBookingsForActivity = bookings.filter(b => b.sessionId === selectedActivityId);
 
-                // Apply timeframe and search filters
+                const occurrences = getWeeklySessionOccurrences(selectedActivity);
+
+                // Apply timeframe, weekly session date, and search filters
                 const now = new Date();
                 const filteredBookingsForActivity = allBookingsForActivity.filter(b => {
+                  // Weekly Session Date filter
+                  if (selectedSessionDateFilter !== 'all') {
+                    if (b.sessionDate !== selectedSessionDateFilter) return false;
+                  }
+
                   // Timeframe filter
                   if (bookingTimeframeFilter !== 'all') {
                     const bDate = getBookingDateObj(b);
@@ -1862,6 +1996,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                   totalAbsent: filteredBookingsForActivity.filter(b => b.attended === false).length,
                   totalUnmarked: filteredBookingsForActivity.filter(b => b.attended === undefined || b.attended === null).length
                 };
+                const isSelectedDateOverCapacity = selectedActivity.capacity > 0 && 
+                  selectedSessionDateFilter !== 'all' && 
+                  stats.totalBooked > selectedActivity.capacity;
 
                 return (
                   <div className="space-y-8">
@@ -1918,8 +2055,13 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               {selectedActivity.category}
                             </span>
                             <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">
-                              Session Register
+                              {selectedSessionDateFilter !== 'all' ? `Session Date: ${selectedSessionDateFilter}` : 'Session Register (All Dates)'}
                             </span>
+                            {isSelectedDateOverCapacity && (
+                              <span className="px-2.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-red-600 text-white animate-pulse">
+                                ⚠️ OVER MAXIMUM CAPACITY ({stats.totalBooked} / {selectedActivity.capacity})
+                              </span>
+                            )}
                           </div>
                           <h3 className="text-2xl font-black text-brand-dark-blue brand-heading uppercase tracking-tight">
                             {selectedActivity.title}
@@ -1928,6 +2070,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             <span>📅 {selectedActivity.date ? new Date(selectedActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Flexible'}</span>
                             <span className="text-slate-200">•</span>
                             <span>🕒 {selectedActivity.time || 'N/A'}</span>
+                            <span className="text-slate-200">•</span>
+                            <span>👥 Max Capacity: {selectedActivity.capacity} per session</span>
                             {selectedActivity.location && selectedActivity.location !== 'Unknown' && (
                               <>
                                 <span className="text-slate-200">•</span>
@@ -1939,9 +2083,16 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
                         {/* Stats Dashboard for selected activity */}
                         <div className="grid grid-cols-4 gap-3 w-full md:w-auto min-w-[320px]">
-                          <div className="bg-slate-50 border border-slate-100 p-3 rounded-2xl text-center">
+                          <div className={`p-3 rounded-2xl text-center border ${
+                            isSelectedDateOverCapacity 
+                              ? 'bg-red-50 border-red-200 text-red-700' 
+                              : 'bg-slate-50 border-slate-100'
+                          }`}>
                             <p className="text-[8px] text-slate-400 font-extrabold uppercase tracking-widest">Booked</p>
-                            <p className="text-lg font-black text-slate-700 mt-1">{stats.totalBooked}</p>
+                            <p className={`text-lg font-black mt-1 ${isSelectedDateOverCapacity ? 'text-red-600' : 'text-slate-700'}`}>
+                              {stats.totalBooked}
+                              {selectedSessionDateFilter !== 'all' && selectedActivity.capacity > 0 && ` / ${selectedActivity.capacity}`}
+                            </p>
                           </div>
                           <div className="bg-green-50/50 border border-green-100/50 p-3 rounded-2xl text-center">
                             <p className="text-[8px] text-green-500 font-extrabold uppercase tracking-widest">Attended</p>
@@ -1956,6 +2107,73 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             <p className="text-lg font-black text-slate-500 mt-1">{stats.totalUnmarked}</p>
                           </div>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Dated Weekly Session Registers Selector */}
+                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                          <h4 className="text-xs font-black brand-heading uppercase tracking-wider text-brand-dark-blue flex items-center gap-2">
+                            📅 Dated Weekly Session Registers
+                          </h4>
+                          <p className="text-[11px] text-slate-400">
+                            Select a specific dated weekly session to view its attendee register and capacity:
+                          </p>
+                        </div>
+                        {selectedSessionDateFilter !== 'all' && (
+                          <button
+                            onClick={() => setSelectedSessionDateFilter('all')}
+                            className="text-[10px] font-bold text-brand-orange uppercase brand-heading hover:underline"
+                          >
+                            Show All Dates Combined →
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          onClick={() => setSelectedSessionDateFilter('all')}
+                          className={`px-4 py-2.5 rounded-xl text-xs font-bold brand-heading uppercase tracking-wider transition-all border ${
+                            selectedSessionDateFilter === 'all'
+                              ? 'bg-brand-dark-blue text-white border-brand-dark-blue shadow-md'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          All Dates Combined ({allBookingsForActivity.length})
+                        </button>
+                        {occurrences.map(occ => {
+                          const occBookings = allBookingsForActivity.filter(b => b.sessionDate === occ.dateStr && b.status !== 'cancelled');
+                          const count = occBookings.length;
+                          const isSelected = selectedSessionDateFilter === occ.dateStr;
+                          const isOver = selectedActivity.capacity > 0 && count > selectedActivity.capacity;
+                          
+                          return (
+                            <button
+                              key={occ.dateStr}
+                              onClick={() => setSelectedSessionDateFilter(occ.dateStr)}
+                              className={`px-3.5 py-2 rounded-xl text-[11px] font-bold brand-heading transition-all border flex items-center gap-2 ${
+                                isSelected
+                                  ? 'bg-brand-orange text-white border-brand-orange shadow-md scale-105'
+                                  : isOver
+                                  ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:border-brand-orange/40 hover:bg-slate-50'
+                              }`}
+                            >
+                              <span>{occ.displayDate}</span>
+                              {occ.isToday && <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase font-black ${isSelected ? 'bg-white/20' : 'bg-emerald-100 text-emerald-800'}`}>Today</span>}
+                              <span className={`text-[9px] px-2 py-0.5 rounded-md font-black ${
+                                isSelected 
+                                  ? 'bg-white/20 text-white' 
+                                  : isOver 
+                                  ? 'bg-red-600 text-white animate-pulse' 
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {isOver ? `⚠️ ${count} / ${selectedActivity.capacity}` : `${count} Booked`}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -2003,18 +2221,19 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                         <table className="w-full text-left">
                           <thead>
                             <tr className="bg-slate-50 border-b border-slate-100">
-                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant (Surname First)</th>
-                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker & Contact Info</th>
-                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Registration Date</th>
-                              <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
+                              <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant (Surname First)</th>
+                              <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker & Contact Info</th>
+                              <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Date Registered For</th>
+                              <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date Booked</th>
+                              <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance Registry Status</th>
                               <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Action</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
                             {sortedBookingsForActivity.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">
-                                  No registered participants found for this filter
+                                <td colSpan={6} className="px-8 py-20 text-center text-slate-400 font-bold brand-heading uppercase tracking-widest text-xs">
+                                  No registered participants found for this session date or filter
                                 </td>
                               </tr>
                             ) : (
@@ -2023,12 +2242,13 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                 const bookingDateStr = b.bookingDate?.toDate ? b.bookingDate.toDate().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent';
                                 const isDup = allBookingsForActivity.filter(other => 
                                   other.status !== 'cancelled' && 
+                                  other.sessionDate === b.sessionDate &&
                                   (other.participantName || '').toLowerCase().trim() === (b.participantName || '').toLowerCase().trim()
                                 ).length > 1;
                                 
                                 return (
                                   <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${isDup ? 'bg-amber-50/40' : ''}`}>
-                                    <td className="px-8 py-5">
+                                    <td className="px-6 py-5">
                                       <div className="flex items-center gap-2">
                                         <p className="text-brand-dark-blue font-black brand-heading text-sm">{nameInfo.display}</p>
                                         {isDup && (
@@ -2039,7 +2259,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                       </div>
                                       <p className="text-[9px] text-slate-400 font-extrabold uppercase mt-0.5 tracking-wider">ID: {b.id.slice(-6)}</p>
                                     </td>
-                                    <td className="px-8 py-5">
+                                    <td className="px-6 py-5">
                                       <p className="text-slate-700 text-xs font-semibold">{b.bookerName || 'N/A'}</p>
                                       {b.bookerMobile && (
                                         <a href={`tel:${b.bookerMobile}`} style={{ color: COLORS.orange }} className="text-[10px] font-bold hover:underline">
@@ -2047,8 +2267,16 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                         </a>
                                       )}
                                     </td>
-                                    <td className="px-8 py-5 text-xs font-semibold text-slate-500">
-                                      {bookingDateStr}
+                                    <td className="px-6 py-5">
+                                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-orange/10 border border-brand-orange/20 rounded-xl text-brand-orange font-bold text-xs brand-heading">
+                                        <span>📅</span>
+                                        <span>{b.sessionDate ? parseLocalDate(b.sessionDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}</span>
+                                      </div>
+                                      {b.sessionTime && <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase brand-heading">🕒 {b.sessionTime}</p>}
+                                    </td>
+                                    <td className="px-6 py-5 text-xs text-slate-500">
+                                      <p className="font-semibold text-slate-600">{bookingDateStr}</p>
+                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Booking Made</span>
                                     </td>
                                     <td className="px-8 py-5">
                                       <div className="flex justify-center items-center gap-2">
@@ -2156,11 +2384,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-100">
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session</th>
-                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date/Time</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Date Registered For</th>
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Participant</th>
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booker</th>
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Contact</th>
-                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Booking Made</th>
+                        <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date Booked (Timestamp)</th>
                         <th className="px-8 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Attendance</th>
                         <th className="px-6 py-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest brand-heading text-center">Action</th>
                       </tr>
@@ -2179,15 +2407,35 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             (other.participantName || '').toLowerCase().trim() === (booking.participantName || '').toLowerCase().trim()
                           ).length > 1;
 
+                          const act = activities.find(a => a.id === booking.sessionId);
+                          const sessionBookingsCount = bookings.filter(b => b.sessionId === booking.sessionId && b.sessionDate === booking.sessionDate && b.status !== 'cancelled').length;
+                          const isOver = act && act.capacity > 0 && sessionBookingsCount > act.capacity;
+
+                          const formattedBookingDate = booking.bookingDate?.toDate 
+                            ? booking.bookingDate.toDate().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+                            : typeof booking.bookingDate === 'string'
+                            ? new Date(booking.bookingDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : 'Recent';
+
                           return (
                             <tr key={booking.id} className={`hover:bg-slate-50/50 transition-colors group ${isDup ? 'bg-amber-50/40' : ''}`}>
                               <td className="px-8 py-6">
-                                <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
+                                  {isOver && (
+                                    <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-600 text-white shrink-0">
+                                      Over Capacity
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">ID: {booking.sessionId.slice(-6)}</p>
                               </td>
                               <td className="px-8 py-6">
-                                <p className="text-slate-600 font-bold text-xs">{new Date(booking.sessionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</p>
-                                <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">{booking.sessionTime}</p>
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-brand-orange/10 border border-brand-orange/20 rounded-xl text-brand-orange font-bold text-xs brand-heading">
+                                  <span>📅</span>
+                                  <span>{booking.sessionDate ? parseLocalDate(booking.sessionDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : 'Flexible / N/A'}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase mt-1">🕒 {booking.sessionTime || 'N/A'}</p>
                               </td>
                               <td className="px-8 py-6">
                                 <div className="flex items-center gap-2">
@@ -2206,9 +2454,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                 <p style={{ color: COLORS.orange }} className="font-bold text-xs">{booking.bookerMobile}</p>
                               </td>
                               <td className="px-8 py-6">
-                                <p className="text-[10px] text-slate-400 font-bold brand-heading uppercase">
-                                  {booking.bookingDate?.toDate ? booking.bookingDate.toDate().toLocaleString() : 'Recent'}
-                                </p>
+                                <p className="text-slate-700 font-semibold text-xs">{formattedBookingDate}</p>
+                                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Booking Made</span>
                               </td>
                               <td className="px-8 py-6">
                                 <div className="flex justify-center items-center gap-2">
@@ -3611,6 +3858,57 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
                     />
                   </div>
+
+                  {editingActivity && (editingActivity.frequency === 'weekly' || (editingActivity.sessionBookings && Object.keys(editingActivity.sessionBookings).length > 0)) && (
+                    <div className="md:col-span-2 p-5 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[11px] font-black text-brand-dark-blue uppercase tracking-wider brand-heading flex items-center gap-1.5">
+                          <span>📅 Dated Registrations for Weekly Occurrences</span>
+                        </label>
+                        <span className="text-[10px] text-slate-400 font-semibold">
+                          Max Capacity: {editingActivity.capacity || 20}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Weekly sessions track attendees separately for each specific session date. Below are the registered counts per weekly session date:
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                        {getWeeklySessionOccurrences(editingActivity).slice(0, 6).map(occ => {
+                          const occBookings = (bookings || []).filter(b => b.sessionId === editingActivity.id && b.sessionDate === occ.dateStr && b.status !== 'cancelled').length;
+                          const storedCount = editingActivity.sessionBookings?.[occ.dateStr] ?? 0;
+                          const effectiveCount = Math.max(occBookings, storedCount);
+                          const isOver = (editingActivity.capacity || 0) > 0 && effectiveCount > (editingActivity.capacity || 0);
+
+                          return (
+                            <div key={occ.dateStr} className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
+                              isOver ? 'bg-red-50 border-red-300' : 'bg-slate-50 border-slate-200'
+                            }`}>
+                              <div>
+                                <p className="font-bold text-slate-700 brand-heading text-[11px]">{occ.displayDate}</p>
+                                <p className={`text-[10px] font-black mt-0.5 ${isOver ? 'text-red-600' : 'text-slate-500'}`}>
+                                  {effectiveCount} / {editingActivity.capacity} {isOver ? '⚠️ (Over Capacity)' : 'Booked'}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingActivity(null);
+                                  setActiveAdminTab('bookings');
+                                  setActiveBookingView('by-activity');
+                                  setSelectedActivityId(editingActivity.id);
+                                  setSelectedSessionDateFilter(occ.dateStr);
+                                }}
+                                className="px-2.5 py-1 bg-white border border-slate-200 hover:border-brand-orange text-brand-orange rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all shadow-sm"
+                              >
+                                View Register →
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="md:col-span-2 space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Session Image (Optional)</label>
                     <div className="flex items-center gap-4">
@@ -3673,107 +3971,298 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-6">
-              {activities.map((act) => (
-                <div key={act.id} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 group hover:shadow-md transition-all">
-                  {act.imageUrl && (
-                    <ImageWithFallback
-                      src={act.imageUrl} 
-                      alt="" 
-                      className="w-24 h-24 object-cover rounded-2xl hidden md:block border border-gray-100" 
-                    />
-                  )}
-                  <div className="flex-grow">
-                    <div className="flex items-center gap-4 mb-3">
-                      <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg brand-heading ${
-                        act.status === 'upcoming_not_bookable'
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : act.status === 'upcoming' || act.status === 'upcoming_bookable'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-slate-100 text-slate-600 border border-slate-200'
-                      }`}>
-                        {getActivityDisplayStatus(act.status)}
-                      </span>
-                      <span className="text-[9px] font-bold uppercase tracking-widest bg-slate-100 text-slate-500 px-3 py-1 rounded-lg brand-heading">
-                        {act.category}
-                      </span>
-                      {act.frequency === 'weekly' && (
-                        <span className="text-[9px] font-bold uppercase tracking-widest bg-brand-orange/10 text-brand-orange px-3 py-1 rounded-lg brand-heading">
-                          Weekly
-                        </span>
-                      )}
-                      {act.frequency === 'weekly' ? (
-                        <span className="text-[10px] font-bold text-slate-400 brand-heading uppercase">
-                          Next: {(() => {
-                            const today = new Date();
-                            today.setHours(0,0,0,0);
-                            let occ = parseLocalDate(act.date);
-                            while (occ < today) occ.setDate(occ.getDate() + 7);
-                            return occ.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-                          })()} @ {act.time}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-slate-400 brand-heading uppercase">
-                          {parseLocalDate(act.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} @ {act.time}
-                        </span>
-                      )}
-                    </div>
-                    <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold brand-heading mb-1">{act.title}</h3>
-                    <div className="flex items-center gap-6 mt-2">
-                      {isActivityBookable(act) ? (
-                        <div className="px-3 py-1 bg-brand-orange/5 border border-brand-orange/20 rounded-lg">
-                          <p className="text-[10px] font-bold text-brand-orange uppercase tracking-widest brand-heading">
-                            Booking Status: {(() => {
-                              if (act.frequency !== 'weekly') return act.bookedCount;
-                              
-                              const today = new Date();
-                              today.setHours(0,0,0,0);
-                              let occ = parseLocalDate(act.date);
-                              while (occ < today) occ.setDate(occ.getDate() + 7);
-                              const effectiveDate = formatLocalDateStr(occ);
-                              
-                              return (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === effectiveDate).length;
-                            })()} / {act.capacity} Booked
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="px-3 py-1 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-1.5">
-                          <span className="text-amber-700 text-xs">ℹ️</span>
-                          <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest brand-heading">
-                            Information Only • No Booking Required
-                          </p>
-                        </div>
-                      )}
-                      {act.flickrAlbumUrl && (
-                        <div className="flex items-center gap-2 text-[10px] font-black text-brand-light-blue uppercase tracking-widest brand-heading">
-                          <Icons.Camera /> Album Linked
-                        </div>
-                      )}
+            {/* Overall Capacity Alerts Banner across all sessions */}
+            {(() => {
+              const overCapacityOccurrences: { activity: ActivityType; dateStr: string; displayDate: string; booked: number; capacity: number }[] = [];
+              activities.forEach(act => {
+                if (!isActivityBookable(act) || (act.capacity || 0) <= 0) return;
+                const occs = getWeeklySessionOccurrences(act);
+                occs.forEach(occ => {
+                  const occBookings = (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === occ.dateStr && b.status !== 'cancelled').length;
+                  const stored = act.sessionBookings?.[occ.dateStr] ?? (act.frequency !== 'weekly' || occ.dateStr === act.date ? (act.bookedCount || 0) : 0);
+                  const count = Math.max(occBookings, stored);
+                  if (count > act.capacity) {
+                    overCapacityOccurrences.push({
+                      activity: act,
+                      dateStr: occ.dateStr,
+                      displayDate: occ.displayDate,
+                      booked: count,
+                      capacity: act.capacity
+                    });
+                  }
+                });
+              });
+
+              if (overCapacityOccurrences.length === 0) return null;
+
+              return (
+                <div className="p-6 bg-red-50 border-2 border-red-500 rounded-[2rem] shadow-sm animate-fadeIn mb-6">
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-2xl">⚠️</span>
+                    <div>
+                      <h4 className="text-base font-black text-red-800 brand-heading uppercase tracking-wide">
+                        Capacity Warning: {overCapacityOccurrences.length} Session Occurrence{overCapacityOccurrences.length > 1 ? 's' : ''} Exceed Maximum Capacity
+                      </h4>
+                      <p className="text-xs text-red-600 font-medium">
+                        More participants have registered than the maximum capacity configured. Review dated registers below to manage registrations or adjust capacity:
+                      </p>
                     </div>
                   </div>
-                  <div className="flex gap-3 shrink-0">
-                    <button 
-                      onClick={() => {
-                        setIsAddingActivity(false);
-                        setEditingActivity(act);
-                      }}
-                      className="px-6 py-3 bg-brand-orange text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95"
-                    >
-                      Update / Track
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteActivity(act.id)}
-                      className={`px-4 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
-                        deletingId === act.id 
-                          ? 'bg-red-600 text-white animate-pulse' 
-                          : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
-                      }`}
-                    >
-                      {deletingId === act.id ? 'Confirm?' : 'Delete'}
-                    </button>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+                    {overCapacityOccurrences.map((alertItem, idx) => (
+                      <div key={`${alertItem.activity.id}-${alertItem.dateStr}-${idx}`} className="bg-white p-4 rounded-2xl border border-red-200 flex flex-col justify-between shadow-sm">
+                        <div>
+                          <div className="flex justify-between items-start gap-2">
+                            <p className="font-extrabold text-brand-dark-blue brand-heading text-xs line-clamp-1">{alertItem.activity.title}</p>
+                            <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-600 text-white shrink-0">
+                              +{alertItem.booked - alertItem.capacity} Over
+                            </span>
+                          </div>
+                          <p className="text-slate-500 text-[11px] font-semibold mt-1">📅 {alertItem.displayDate}</p>
+                          <p className="text-xs font-black text-red-600 mt-2">
+                            {alertItem.booked} Booked / {alertItem.capacity} Max Limit
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setActiveAdminTab('bookings');
+                            setActiveBookingView('by-activity');
+                            setSelectedActivityId(alertItem.activity.id);
+                            setSelectedSessionDateFilter(alertItem.dateStr);
+                          }}
+                          className="mt-3 w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black brand-heading uppercase tracking-wider transition-all shadow-sm flex items-center justify-center gap-1.5"
+                        >
+                          Review Register ({alertItem.booked}) →
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
+              );
+            })()}
+
+            <div className="grid grid-cols-1 gap-6">
+              {activities.map((act) => {
+                const isBookable = isActivityBookable(act);
+                const allActBookings = (bookings || []).filter(b => b.sessionId === act.id && b.status !== 'cancelled');
+                const occs = getWeeklySessionOccurrences(act);
+
+                // Effective next session date for top indicator
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                let occDate = parseLocalDate(act.date);
+                while (occDate < today && act.frequency === 'weekly') occDate.setDate(occDate.getDate() + 7);
+                const effectiveDateStr = formatLocalDateStr(occDate);
+                
+                const currentOccBookings = allActBookings.filter(b => b.sessionDate === effectiveDateStr).length;
+                const storedCount = act.sessionBookings?.[effectiveDateStr] ?? 
+                  (act.frequency !== 'weekly' || effectiveDateStr === act.date ? (act.bookedCount || 0) : 0);
+                const effectiveBookedCount = Math.max(currentOccBookings, storedCount);
+
+                // Check if any occurrence is over capacity
+                const hasAnyOverCapacity = act.capacity > 0 && occs.some(o => {
+                  const bCount = allActBookings.filter(b => b.sessionDate === o.dateStr).length;
+                  const sCount = act.sessionBookings?.[o.dateStr] ?? (act.frequency !== 'weekly' || o.dateStr === act.date ? (act.bookedCount || 0) : 0);
+                  return Math.max(bCount, sCount) > act.capacity;
+                });
+
+                return (
+                  <div key={act.id} className={`bg-white p-8 rounded-[2.5rem] border shadow-sm flex flex-col justify-between gap-6 group hover:shadow-md transition-all ${
+                    hasAnyOverCapacity ? 'border-red-300 ring-1 ring-red-200' : 'border-gray-100'
+                  }`}>
+                    {/* Top Row: Info & Controls */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                      <div className="flex items-start gap-5">
+                        {act.imageUrl && (
+                          <ImageWithFallback
+                            src={act.imageUrl} 
+                            alt="" 
+                            className="w-20 h-20 object-cover rounded-2xl hidden md:block border border-gray-100 shrink-0" 
+                          />
+                        )}
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg brand-heading ${
+                              act.status === 'upcoming_not_bookable'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                : act.status === 'upcoming' || act.status === 'upcoming_bookable'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}>
+                              {getActivityDisplayStatus(act.status)}
+                            </span>
+                            <span className="text-[9px] font-bold uppercase tracking-widest bg-slate-100 text-slate-500 px-3 py-1 rounded-lg brand-heading">
+                              {act.category}
+                            </span>
+                            {act.frequency === 'weekly' && (
+                              <span className="text-[9px] font-bold uppercase tracking-widest bg-brand-orange/10 text-brand-orange px-3 py-1 rounded-lg brand-heading">
+                                Weekly Recurring
+                              </span>
+                            )}
+                            {hasAnyOverCapacity && (
+                              <span className="text-[9px] font-black uppercase tracking-widest bg-red-600 text-white px-3 py-1 rounded-lg brand-heading animate-pulse">
+                                ⚠️ Over Maximum Capacity
+                              </span>
+                            )}
+                          </div>
+                          
+                          <h3 style={{ color: COLORS.secondary }} className="text-xl font-bold brand-heading mb-1">{act.title}</h3>
+                          
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-400 text-xs font-semibold mt-1 uppercase tracking-wide">
+                            {act.frequency === 'weekly' ? (
+                              <span>📅 Next: {occDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} @ {act.time}</span>
+                            ) : (
+                              <span>📅 {parseLocalDate(act.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} @ {act.time}</span>
+                            )}
+                            <span className="text-slate-200">•</span>
+                            <span>👥 Max Capacity: {act.capacity} per session</span>
+                            {act.location && act.location !== 'Unknown' && (
+                              <>
+                                <span className="text-slate-200">•</span>
+                                <span>📍 {act.location}</span>
+                              </>
+                            )}
+                            {act.flickrAlbumUrl && (
+                              <>
+                                <span className="text-slate-200">•</span>
+                                <span className="text-brand-light-blue font-bold flex items-center gap-1"><Icons.Camera /> Album Linked</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Header Buttons */}
+                      <div className="flex flex-wrap items-center gap-3 shrink-0">
+                        <button 
+                          onClick={() => {
+                            setActiveAdminTab('bookings');
+                            setActiveBookingView('by-activity');
+                            setSelectedActivityId(act.id);
+                            setSelectedSessionDateFilter('all');
+                          }}
+                          className="px-5 py-3 bg-brand-dark-blue hover:bg-slate-800 text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-1.5"
+                          title="Open full dated attendance registers for this session"
+                        >
+                          📋 Open Registers ({allActBookings.length})
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setIsAddingActivity(false);
+                            setEditingActivity(act);
+                          }}
+                          className="px-5 py-3 bg-brand-orange text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95"
+                        >
+                          Update / Track
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteActivity(act.id)}
+                          className={`px-4 py-3 rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all ${
+                            deletingId === act.id 
+                              ? 'bg-red-600 text-white animate-pulse' 
+                              : 'bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50'
+                          }`}
+                        >
+                          {deletingId === act.id ? 'Confirm?' : 'Delete'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Dated Weekly Sessions Registers Section */}
+                    {isBookable && (
+                      <div className="pt-4 border-t border-slate-100">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
+                          <div>
+                            <h4 className="text-xs font-black text-brand-dark-blue brand-heading uppercase tracking-wider flex items-center gap-2">
+                              <span>📅 Dated Session Registers & Capacity Breakdown</span>
+                              {act.frequency === 'weekly' && <span className="text-[10px] font-normal text-slate-400 normal-case">(Click any dated session to view its attendee list)</span>}
+                            </h4>
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            Total Registrations on Record: {allActBookings.length}
+                          </span>
+                        </div>
+
+                        {/* List of Dated Weekly Occurrences */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          {occs.slice(0, 8).map(occ => {
+                            const occBookings = allActBookings.filter(b => b.sessionDate === occ.dateStr);
+                            const stored = act.sessionBookings?.[occ.dateStr] ?? (act.frequency !== 'weekly' || occ.dateStr === act.date ? (act.bookedCount || 0) : 0);
+                            const count = Math.max(occBookings.length, stored);
+                            const isOver = act.capacity > 0 && count > act.capacity;
+                            const isFull = act.capacity > 0 && count === act.capacity;
+                            const spacesRemaining = Math.max(0, act.capacity - count);
+
+                            return (
+                              <div
+                                key={occ.dateStr}
+                                onClick={() => {
+                                  setActiveAdminTab('bookings');
+                                  setActiveBookingView('by-activity');
+                                  setSelectedActivityId(act.id);
+                                  setSelectedSessionDateFilter(occ.dateStr);
+                                }}
+                                className={`p-3.5 rounded-2xl border transition-all cursor-pointer hover:shadow-md flex flex-col justify-between ${
+                                  isOver 
+                                    ? 'bg-red-50 border-red-200 hover:border-red-400' 
+                                    : isFull 
+                                    ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300' 
+                                    : 'bg-slate-50 border-slate-100 hover:border-brand-orange/40 hover:bg-white'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex justify-between items-center gap-1.5 mb-1.5">
+                                    <span className="text-[11px] font-extrabold text-brand-dark-blue brand-heading">
+                                      {occ.displayDate}
+                                    </span>
+                                    {occ.isToday && (
+                                      <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                                        Today
+                                      </span>
+                                    )}
+                                    {occ.isNext && !occ.isToday && (
+                                      <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-brand-orange/15 text-brand-orange">
+                                        Next
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs mt-1">
+                                    <span className="text-[10px] text-slate-500 font-medium">Booked:</span>
+                                    <span className={`font-black ${
+                                      isOver ? 'text-red-600' : isFull ? 'text-amber-800' : 'text-brand-dark-blue'
+                                    }`}>
+                                      {count} / {act.capacity}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex justify-between items-center text-[10px]">
+                                  {isOver ? (
+                                    <span className="text-red-600 font-extrabold flex items-center gap-1">
+                                      ⚠️ Over by {count - act.capacity}!
+                                    </span>
+                                  ) : isFull ? (
+                                    <span className="text-amber-700 font-bold">
+                                      Session Full
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-semibold">
+                                      {spacesRemaining} space{spacesRemaining !== 1 ? 's' : ''} left
+                                    </span>
+                                  )}
+                                  <span className="text-brand-orange font-bold uppercase tracking-wider text-[9px] hover:underline">
+                                    Register ({occBookings.length}) →
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

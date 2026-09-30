@@ -388,6 +388,29 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // Ensure initial activities are seeded into Firestore when an authenticated user is present
+  useEffect(() => {
+    if (!user) return;
+    const seedInitialActivities = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'activities'));
+        if (snap.empty) {
+          for (const act of SAMPLE_ACTIVITIES) {
+            await setDoc(doc(db, 'activities', act.id), {
+              ...act,
+              sessionBookings: {
+                [act.date]: act.bookedCount || 0
+              }
+            }, { merge: true });
+          }
+        }
+      } catch (err) {
+        console.warn("Could not seed activities to Firestore:", err);
+      }
+    };
+    seedInitialActivities();
+  }, [user]);
+
   // Sync partners from Firestore
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'partners'), (snapshot) => {
@@ -1241,7 +1264,56 @@ const App: React.FC = () => {
     const detailsList = Array.isArray(bookingDetails) ? bookingDetails : [bookingDetails];
     if (detailsList.length === 0) return;
 
+    const targetActivity = detailsList[0].activity;
+    const activityId = targetActivity.id;
+    const activityDate = targetActivity.date; // effective session date
+    const numParticipants = detailsList.length;
+
+    // Strict Capacity Enforcement to prevent overbooking:
+    let maxCapacity = targetActivity.capacity ?? 20;
+    let currentBooked = 0;
+
+    const localAct = activities.find(a => a.id === activityId);
+    if (localAct) {
+      maxCapacity = localAct.capacity ?? maxCapacity;
+      const countMap = localAct.sessionBookings || {};
+      currentBooked = countMap[activityDate] ?? 
+        (localAct.frequency !== 'weekly' || activityDate === localAct.date ? (localAct.bookedCount || 0) : 0);
+    }
+
+    // Check active non-cancelled registrations in sessionRegistrations
+    const confirmedInState = sessionRegistrations.filter(
+      b => b.sessionId === activityId && b.sessionDate === activityDate && b.status !== 'cancelled'
+    ).length;
+    currentBooked = Math.max(currentBooked, confirmedInState);
+
+    // Also check Firestore live to prevent race conditions
+    try {
+      const actSnap = await getDoc(doc(db, 'activities', activityId));
+      if (actSnap.exists()) {
+        const d = actSnap.data() as Activity;
+        maxCapacity = d.capacity ?? maxCapacity;
+        const liveCounts = d.sessionBookings || {};
+        const liveDateCount = liveCounts[activityDate] ?? 
+          (d.frequency !== 'weekly' || activityDate === d.date ? (d.bookedCount || 0) : 0);
+        currentBooked = Math.max(currentBooked, liveDateCount);
+      }
+    } catch (e) {
+      console.warn("Could not fetch remote activity capacity, using local count:", e);
+    }
+
+    const spacesRemaining = Math.max(0, maxCapacity - currentBooked);
+    if (numParticipants > spacesRemaining) {
+      const msg = spacesRemaining <= 0
+        ? `This session is fully booked (Maximum capacity: ${maxCapacity}). No additional registrations can be accepted.`
+        : `Capacity limit reached: Only ${spacesRemaining} space(s) remain for "${targetActivity.title}" on ${activityDate}, but you attempted to register ${numParticipants} participant(s). Please reduce your selection.`;
+      setNotification(msg);
+      alert(msg);
+      return;
+    }
+
     const path = 'bookings';
+    const createdBookingIds: string[] = [];
     try {
       for (const detail of detailsList) {
         // Raise a warning note with admin if they confirmed against their medical/dietary info
@@ -1299,7 +1371,7 @@ const App: React.FC = () => {
         }
 
         // 1. Save to global bookings collection for admin log
-        await addDoc(collection(db, path), {
+        const bookingDocRef = await addDoc(collection(db, path), {
           bookerName: user.name,
           participantName: detail.participantName,
           bookerMobile: detail.bookerMobile,
@@ -1315,6 +1387,7 @@ const App: React.FC = () => {
           foodConflictConfirmed: detail.foodConflictConfirmed || false,
           foodConflictWarningRaised: detail.foodConflictConfirmed || false,
         });
+        createdBookingIds.push(bookingDocRef.id);
 
         // 2. Trigger email for the booking
         await addDoc(collection(db, 'mail'), {
@@ -1346,11 +1419,101 @@ const App: React.FC = () => {
         });
       }
 
-      // 3. Increment activity count by the number of booked participants
-      const activityRef = doc(db, 'activities', detailsList[0].activity.id);
-      await updateDoc(activityRef, {
-        bookedCount: increment(detailsList.length)
+      // 3. Increment activity count and per-session count in Firestore
+      const targetActivity = detailsList[0].activity;
+      const activityId = targetActivity.id;
+      const activityDate = targetActivity.date; // effective session date
+      const numParticipants = detailsList.length;
+
+      try {
+        const activityRef = doc(db, 'activities', activityId);
+        const activitySnap = await getDoc(activityRef);
+
+        if (activitySnap.exists()) {
+          const actData = activitySnap.data() as Activity;
+          const currentSessionCounts = actData.sessionBookings || {};
+          const currentForDate = currentSessionCounts[activityDate] ?? (activityDate === actData.date ? actData.bookedCount : 0) ?? 0;
+          const newCountForDate = currentForDate + numParticipants;
+          
+          await updateDoc(activityRef, {
+            bookedCount: increment(numParticipants),
+            [`sessionBookings.${activityDate}`]: newCountForDate
+          });
+        } else {
+          const baseActivity = activities.find(a => a.id === activityId) || targetActivity;
+          const initialCount = (baseActivity.bookedCount || 0) + numParticipants;
+          await setDoc(activityRef, {
+            title: baseActivity.title,
+            description: baseActivity.description,
+            date: baseActivity.date,
+            time: baseActivity.time,
+            location: baseActivity.location || 'The Hub',
+            capacity: baseActivity.capacity || 20,
+            bookedCount: initialCount,
+            category: baseActivity.category || 'community',
+            status: baseActivity.status || 'upcoming',
+            frequency: baseActivity.frequency || 'once',
+            sessionBookings: {
+              ...(baseActivity.sessionBookings || {}),
+              [activityDate]: initialCount
+            },
+            ...(baseActivity.imageUrl ? { imageUrl: baseActivity.imageUrl } : {}),
+            ...(baseActivity.flickrAlbumUrl ? { flickrAlbumUrl: baseActivity.flickrAlbumUrl } : {}),
+            ...(baseActivity.includesFood !== undefined ? { includesFood: baseActivity.includesFood } : {}),
+            ...(baseActivity.foodOptions ? { foodOptions: baseActivity.foodOptions } : {})
+          });
+        }
+      } catch (actErr) {
+        console.warn("Could not update activity document in Firestore:", actErr);
+      }
+
+      // 4. Update local activities state immediately so UI numbers reduce instantly
+      setActivities(prev => prev.map(a => {
+        if (a.id !== activityId) return a;
+        const prevSessionBookings = a.sessionBookings || {};
+        const currentForDate = prevSessionBookings[activityDate] ?? (activityDate === a.date ? a.bookedCount : 0) ?? 0;
+        return {
+          ...a,
+          bookedCount: (a.bookedCount || 0) + numParticipants,
+          sessionBookings: {
+            ...prevSessionBookings,
+            [activityDate]: currentForDate + numParticipants
+          }
+        };
+      }));
+
+      // 5. Update local registrations optimistically
+      const newBookings: Booking[] = detailsList.map((detail, idx) => ({
+        id: createdBookingIds[idx] || `bk-${Date.now()}-${idx}`,
+        bookerName: user.name,
+        participantName: detail.participantName,
+        bookerMobile: detail.bookerMobile,
+        bookingDate: new Date(),
+        sessionTitle: detail.activity.title,
+        sessionDate: detail.activity.date,
+        sessionTime: detail.activity.time,
+        sessionId: detail.activity.id,
+        userId: user.id,
+        targetEmail: 'jstreet@freeatlast.co.uk',
+        status: 'booked',
+        foodChoice: detail.foodChoice || '',
+        foodConflictConfirmed: detail.foodConflictConfirmed || false,
+        foodConflictWarningRaised: detail.foodConflictConfirmed || false,
+      }));
+
+      setUserRegistrations(prev => {
+        const updated = [...newBookings, ...prev];
+        safeSetStorage('cached_user_registrations', JSON.stringify(updated));
+        return updated;
       });
+      setBookings(prev => Array.from(new Set([...prev, activityId])));
+      if (user.role === 'admin') {
+        setSessionRegistrations(prev => {
+          const updated = [...newBookings, ...prev];
+          safeSetStorage('cached_session_registrations', JSON.stringify(updated));
+          return updated;
+        });
+      }
       
       const namesJoined = detailsList.map(d => d.participantName).join(', ');
       setNotification(`Registration successful for ${namesJoined}!`);
@@ -1415,16 +1578,41 @@ const App: React.FC = () => {
         const bookingData = bookingSnap.data() as Booking;
         participantName = bookingData.participantName || 'Participant';
         
-        // If not already cancelled, decrement bookedCount
+        // If not already cancelled, decrement bookedCount and sessionBookings
         if (bookingData.status !== 'cancelled' && bookingData.sessionId) {
           try {
             const activityRef = doc(db, 'activities', bookingData.sessionId);
-            await updateDoc(activityRef, {
-              bookedCount: increment(-1)
-            });
+            const actSnap = await getDoc(activityRef);
+            if (actSnap.exists()) {
+              const actData = actSnap.data() as Activity;
+              const currentSessionCounts = actData.sessionBookings || {};
+              const sessionDate = bookingData.sessionDate;
+              const currentForDate = currentSessionCounts[sessionDate] ?? 1;
+              const newForDate = Math.max(0, currentForDate - 1);
+              
+              await updateDoc(activityRef, {
+                bookedCount: increment(-1),
+                [`sessionBookings.${sessionDate}`]: newForDate
+              });
+            }
           } catch (actErr) {
             console.warn("Could not decrement activity bookedCount on delete:", actErr);
           }
+
+          setActivities(prev => prev.map(a => {
+            if (a.id !== bookingData.sessionId) return a;
+            const prevSessionBookings = a.sessionBookings || {};
+            const sessionDate = bookingData.sessionDate;
+            const currentForDate = prevSessionBookings[sessionDate] ?? 1;
+            return {
+              ...a,
+              bookedCount: Math.max(0, (a.bookedCount || 1) - 1),
+              sessionBookings: {
+                ...prevSessionBookings,
+                [sessionDate]: Math.max(0, currentForDate - 1)
+              }
+            };
+          }));
         }
       }
       
@@ -1493,16 +1681,55 @@ const App: React.FC = () => {
         status: 'cancelled'
       });
 
-      // 2. Decrement activity count
+      // 2. Decrement activity count and sessionBookings
       if (bookingData.sessionId) {
         try {
           const activityRef = doc(db, 'activities', bookingData.sessionId);
-          await updateDoc(activityRef, {
-            bookedCount: increment(-1)
-          });
+          const actSnap = await getDoc(activityRef);
+          if (actSnap.exists()) {
+            const actData = actSnap.data() as Activity;
+            const currentSessionCounts = actData.sessionBookings || {};
+            const sessionDate = bookingData.sessionDate;
+            const currentForDate = currentSessionCounts[sessionDate] ?? 1;
+            const newForDate = Math.max(0, currentForDate - 1);
+            
+            await updateDoc(activityRef, {
+              bookedCount: increment(-1),
+              [`sessionBookings.${sessionDate}`]: newForDate
+            });
+          }
         } catch (actErr) {
           console.warn("Could not decrement activity count:", actErr);
         }
+
+        setActivities(prev => prev.map(a => {
+          if (a.id !== bookingData.sessionId) return a;
+          const prevSessionBookings = a.sessionBookings || {};
+          const sessionDate = bookingData.sessionDate;
+          const currentForDate = prevSessionBookings[sessionDate] ?? 1;
+          return {
+            ...a,
+            bookedCount: Math.max(0, (a.bookedCount || 1) - 1),
+            sessionBookings: {
+              ...prevSessionBookings,
+              [sessionDate]: Math.max(0, currentForDate - 1)
+            }
+          };
+        }));
+      }
+
+      // Optimistically update local registrations
+      setUserRegistrations(prev => {
+        const updated = prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled' as const } : b);
+        safeSetStorage('cached_user_registrations', JSON.stringify(updated));
+        return updated;
+      });
+      if (user.role === 'admin') {
+        setSessionRegistrations(prev => {
+          const updated = prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled' as const } : b);
+          safeSetStorage('cached_session_registrations', JSON.stringify(updated));
+          return updated;
+        });
       }
 
       // 3. Trigger cancellation email alert

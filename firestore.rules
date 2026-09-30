@@ -186,11 +186,11 @@ service cloud.firestore {
 
     match /activities/{activityId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidActivity(incoming());
+      allow create: if (isAdmin() || isSignedIn()) && isValidActivity(incoming());
       allow update: if (isAdmin() && isValidActivity(incoming())) ||
                        (isSignedIn() && 
-                        incoming().diff(existing()).affectedKeys().hasOnly(['bookedCount']) && 
-                        incoming().bookedCount is number);
+                        (incoming().diff(existing()).affectedKeys().hasOnly(['bookedCount', 'sessionBookings']) ||
+                         isValidActivity(incoming())));
       allow delete: if isAdmin();
     }
 

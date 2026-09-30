@@ -64,6 +64,26 @@ export const Activities: React.FC<ActivitiesProps> = ({
   const [bookerMobile, setBookerMobile] = useState<string>('');
   const [participants, setParticipants] = useState<BookingParticipant[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [selectedSessionDate, setSelectedSessionDate] = useState<string>('');
+
+  const getUpcomingWeeklyOccurrences = (activity: Activity, count: number = 4): string[] => {
+    if (activity.frequency !== 'weekly') {
+      return [activity.date];
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let d = parseLocalDate(activity.date);
+    while (d < today) {
+      d.setDate(d.getDate() + 7);
+    }
+    const dates: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const cur = new Date(d);
+      cur.setDate(d.getDate() + (i * 7));
+      dates.push(formatLocalDateStr(cur));
+    }
+    return dates;
+  };
 
   const parseLocalDate = (dateStr: string): Date => {
     if (!dateStr) return new Date();
@@ -275,6 +295,8 @@ export const Activities: React.FC<ActivitiesProps> = ({
     }
 
     setSelectedActivity(activity);
+    const effective = getEffectiveSession(activity);
+    setSelectedSessionDate(effective.date);
     const mobile = user?.profile?.parentMobile || (user?.profile as any)?.mobileNumber || '';
     setBookerMobile(mobile);
 
@@ -423,14 +445,17 @@ export const Activities: React.FC<ActivitiesProps> = ({
     }
 
     const effective = getEffectiveSession(selectedActivity);
+    const activeDate = selectedSessionDate || effective.date;
     const occurrenceBookings = allBookings.filter(
-      b => b.sessionId === selectedActivity.id && b.sessionDate === effective.date && b.status !== 'cancelled'
+      b => b.sessionId === selectedActivity.id && b.sessionDate === activeDate && b.status !== 'cancelled'
     );
-    const currentBookedCount = occurrenceBookings.length;
-    const remainingSpaces = selectedActivity.capacity - currentBookedCount;
+    const storedSessionCount = selectedActivity.sessionBookings?.[activeDate] ?? 
+      (selectedActivity.frequency !== 'weekly' || activeDate === selectedActivity.date ? (selectedActivity.bookedCount || 0) : 0);
+    const currentBookedCount = Math.max(storedSessionCount, occurrenceBookings.length);
+    const remainingSpaces = Math.max(0, selectedActivity.capacity - currentBookedCount);
 
     if (participants.length > remainingSpaces) {
-      alert(`Sorry, only ${remainingSpaces} space(s) remain for this session, but you have ${participants.length} participant(s) selected. Please adjust your selection.`);
+      alert(`Sorry, only ${remainingSpaces} space(s) remain for this session date (${activeDate}), but you have ${participants.length} participant(s) selected. Please adjust your selection.`);
       return;
     }
 
@@ -443,7 +468,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
     const detailsList: BookingDetail[] = participants.map(p => ({
       participantName: p.name.trim(),
       bookerMobile: bookerMobile.trim(),
-      activity: { ...selectedActivity, date: effective.date },
+      activity: { ...selectedActivity, date: activeDate },
       foodChoice: selectedActivity.includesFood ? p.foodChoice : undefined,
       foodConflictConfirmed: p.conflictConfirmed,
     }));
@@ -1019,7 +1044,11 @@ export const Activities: React.FC<ActivitiesProps> = ({
                 const occurrenceBookings = allBookings.filter(
                   b => b.sessionId === activity.id && b.sessionDate === effectiveDate && b.status !== 'cancelled'
                 );
-                const currentBookedCount = occurrenceBookings.length;
+                const storedSessionCount = activity.sessionBookings?.[effectiveDate] ?? 
+                  (activity.frequency !== 'weekly' || effectiveDate === activity.date ? (activity.bookedCount || 0) : 0);
+                const currentBookedCount = Math.max(storedSessionCount, occurrenceBookings.length);
+                const spacesLeft = Math.max(0, activity.capacity - currentBookedCount);
+                const isOverCapacity = currentBookedCount > activity.capacity;
                 
                 // Check if current user is booked for THIS specific occurrence (excluding cancelled)
                 const occurrenceUserBookings = user ? allBookings.filter(b => 
@@ -1030,7 +1059,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                 ) : [];
                 const isBooked = occurrenceUserBookings.length > 0;
 
-                const isFull = currentBookedCount >= activity.capacity;
+                const isFull = spacesLeft === 0;
                 const catColor = getCategoryColor(activity.category);
                 const isBookableActivity = isActivityBookable(activity);
 
@@ -1139,9 +1168,33 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       </>
                     ) : isBookableActivity ? (
                       <>
-                        <span className="text-[10px] font-bold text-gray-400 brand-heading uppercase tracking-widest">
-                          {activity.capacity - currentBookedCount} spaces left
-                        </span>
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-brand-dark-blue brand-heading">
+                              {currentBookedCount} / {activity.capacity} <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Booked</span>
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider brand-heading ${
+                              isOverCapacity
+                                ? 'bg-red-600 text-white animate-pulse shadow-sm'
+                                : spacesLeft === 0 
+                                ? 'bg-red-100 text-red-700 border border-red-200' 
+                                : spacesLeft <= 3 
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200 animate-pulse' 
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}>
+                              {isOverCapacity ? '⚠️ Over Capacity' : spacesLeft === 0 ? 'Full' : `${spacesLeft} left`}
+                            </span>
+                          </div>
+                          {/* Visual progress bar */}
+                          <div className="w-28 sm:w-36 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-300 ${
+                                isOverCapacity ? 'bg-red-600' : spacesLeft === 0 ? 'bg-red-500' : spacesLeft <= 3 ? 'bg-amber-500' : 'bg-brand-orange'
+                              }`}
+                              style={{ width: `${Math.min(100, Math.round((currentBookedCount / Math.max(1, activity.capacity)) * 100))}%` }}
+                            />
+                          </div>
+                        </div>
                         {!user ? (
                           <button 
                             onClick={() => setActiveTab('login')} 
@@ -1239,10 +1292,18 @@ export const Activities: React.FC<ActivitiesProps> = ({
             ? selectedActivity.foodOptions.split(',').map(s => s.trim())[0] || '' 
             : '';
           const effective = getEffectiveSession(selectedActivity);
+          const activeSessionDate = selectedSessionDate || effective.date;
           const occurrenceBookings = allBookings.filter(
-            b => b.sessionId === selectedActivity.id && b.sessionDate === effective.date && b.status !== 'cancelled'
+            b => b.sessionId === selectedActivity.id && b.sessionDate === activeSessionDate && b.status !== 'cancelled'
           );
-          const remainingSpaces = selectedActivity.capacity - occurrenceBookings.length;
+          const storedSessionCount = selectedActivity.sessionBookings?.[activeSessionDate] ?? 
+            (selectedActivity.frequency !== 'weekly' || activeSessionDate === selectedActivity.date ? (selectedActivity.bookedCount || 0) : 0);
+          const modalBookedCount = Math.max(storedSessionCount, occurrenceBookings.length);
+          const remainingSpaces = Math.max(0, selectedActivity.capacity - modalBookedCount);
+          const isModalOverCapacity = modalBookedCount > selectedActivity.capacity;
+          const upcomingWeeklyDates = selectedActivity.frequency === 'weekly' 
+            ? getUpcomingWeeklyOccurrences(selectedActivity, 6) 
+            : [selectedActivity.date];
 
           return (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
@@ -1272,8 +1333,12 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   </h2>
                   <div className="flex flex-wrap items-center gap-2 text-white/80 font-bold text-xs uppercase tracking-[0.15em] brand-heading">
                     <span className="bg-white/10 px-3 py-1 rounded-lg">{selectedActivity.title}</span>
-                    <span className="bg-brand-orange/40 text-orange-200 px-3 py-1 rounded-lg">
-                      {remainingSpaces} {remainingSpaces === 1 ? 'Space' : 'Spaces'} Left
+                    <span className={`px-3 py-1 rounded-lg font-bold ${
+                      isModalOverCapacity ? 'bg-red-500 text-white' : 'bg-brand-orange/40 text-orange-200'
+                    }`}>
+                      {isModalOverCapacity 
+                        ? `⚠️ Over Capacity: ${modalBookedCount} / ${selectedActivity.capacity} Booked` 
+                        : `${modalBookedCount} / ${selectedActivity.capacity} Booked • ${remainingSpaces} ${remainingSpaces === 1 ? 'Space' : 'Spaces'} Left`}
                     </span>
                   </div>
                 </div>
@@ -1286,9 +1351,9 @@ export const Activities: React.FC<ActivitiesProps> = ({
                         <Icons.Calendar className="h-4 w-4" />
                       </div>
                       <div>
-                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Date</p>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Session Date</p>
                         <p className="text-brand-dark-blue font-black text-sm brand-heading">
-                          {parseLocalDate(selectedActivity.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                          {parseLocalDate(activeSessionDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
                         </p>
                       </div>
                     </div>
@@ -1302,6 +1367,52 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  {/* Weekly Session Date Picker */}
+                  {selectedActivity.frequency === 'weekly' && (
+                    <div className="space-y-3 bg-slate-50/90 p-5 rounded-2xl border border-slate-200/80">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-brand-dark-blue uppercase tracking-widest brand-heading">
+                          Choose Weekly Session Occurrence
+                        </label>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Weekly Schedule</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {upcomingWeeklyDates.map(dateStr => {
+                          const occBookings = allBookings.filter(b => b.sessionId === selectedActivity.id && b.sessionDate === dateStr && b.status !== 'cancelled').length;
+                          const stored = selectedActivity.sessionBookings?.[dateStr] ?? (dateStr === selectedActivity.date ? (selectedActivity.bookedCount || 0) : 0);
+                          const booked = Math.max(stored, occBookings);
+                          const spaces = Math.max(0, selectedActivity.capacity - booked);
+                          const isFull = spaces <= 0;
+                          const isSelected = activeSessionDate === dateStr;
+
+                          return (
+                            <button
+                              key={dateStr}
+                              type="button"
+                              onClick={() => setSelectedSessionDate(dateStr)}
+                              className={`p-3 rounded-xl border text-left transition-all ${
+                                isSelected 
+                                  ? 'bg-brand-orange text-white border-brand-orange shadow-md scale-[1.01]' 
+                                  : isFull 
+                                  ? 'bg-slate-100 text-slate-400 border-slate-200 hover:border-slate-300' 
+                                  : 'bg-white text-slate-700 border-slate-200 hover:border-brand-orange/50 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold brand-heading">
+                                <span>{parseLocalDate(dateStr).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                                <span className={`text-[9px] px-2 py-0.5 rounded uppercase font-black tracking-wider ${
+                                  isSelected ? 'bg-white/20 text-white' : isFull ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                                }`}>
+                                  {isFull ? 'Full' : `${spaces} Left`}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Account Family Members Checklist */}
                   {accountMembers.length > 0 && (
