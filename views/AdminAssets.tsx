@@ -123,6 +123,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       capacity: 20,
       bookedCount: 0,
       category: 'youth',
+      ageRange: '',
       status: 'upcoming',
       flickrAlbumUrl: '',
       frequency: 'once'
@@ -475,6 +476,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           capacity: newActivity.capacity ?? 20,
           bookedCount: newActivity.bookedCount ?? 0,
           category: newActivity.category || 'community',
+          ageRange: newActivity.ageRange || '',
           status: newActivity.status || 'upcoming',
           frequency: newActivity.frequency || 'once'
         };
@@ -493,6 +495,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           capacity: 20,
           bookedCount: 0,
           category: 'youth',
+          ageRange: '',
           status: 'upcoming',
           flickrAlbumUrl: '',
           imageUrl: '',
@@ -2072,6 +2075,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             <span>🕒 {selectedActivity.time || 'N/A'}</span>
                             <span className="text-slate-200">•</span>
                             <span>👥 Max Capacity: {selectedActivity.capacity} per session</span>
+                            <span className="text-slate-200">•</span>
+                            <span className="text-brand-orange font-bold">🎯 Age: {selectedActivity.ageRange || 'All Ages'}</span>
                             {selectedActivity.location && selectedActivity.location !== 'Unknown' && (
                               <>
                                 <span className="text-slate-200">•</span>
@@ -3795,6 +3800,19 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     />
                   </div>
                   <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Appropriate Age / Age Range</label>
+                    <input 
+                      type="text"
+                      value={editingActivity ? (editingActivity.ageRange || '') : (newActivity.ageRange || '')}
+                      onChange={(e) => editingActivity ? setEditingActivity({...editingActivity, ageRange: e.target.value}) : setNewActivity({...newActivity, ageRange: e.target.value})}
+                      className="w-full px-6 py-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-orange focus:border-transparent outline-none transition-all"
+                      placeholder="e.g. Ages 8-12, Ages 11-16, All Ages"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      Displayed directly under the date and time on the members booking section.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest brand-heading">Frequency</label>
                     <select 
                       value={editingActivity ? (editingActivity.frequency || 'once') : (newActivity.frequency || 'once')}
@@ -4116,6 +4134,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             )}
                             <span className="text-slate-200">•</span>
                             <span>👥 Max Capacity: {act.capacity} per session</span>
+                            <span className="text-slate-200">•</span>
+                            <span className="text-brand-orange font-bold">🎯 {act.ageRange ? `Age: ${act.ageRange}` : 'All Ages'}</span>
                             {act.location && act.location !== 'Unknown' && (
                               <>
                                 <span className="text-slate-200">•</span>
@@ -4129,6 +4149,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               </>
                             )}
                           </div>
+                          {act.description && (
+                            <p className="text-slate-500 text-xs mt-2 line-clamp-2 leading-relaxed">{act.description}</p>
+                          )}
                         </div>
                       </div>
 

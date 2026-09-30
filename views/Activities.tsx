@@ -1135,7 +1135,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                         </div>
                       )}
 
-                      <p className="text-gray-500 mb-6 text-sm font-light leading-relaxed h-12 overflow-hidden">{activity.description}</p>
+                      <p className="text-gray-600 mb-6 text-sm font-light leading-relaxed">{activity.description}</p>
                       
                       <div className="space-y-3 mb-8">
                         <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
@@ -1147,6 +1147,15 @@ export const Activities: React.FC<ActivitiesProps> = ({
                         <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
                           <span style={{ color: COLORS.orange }}><Icons.Clock /></span>
                           <span>{activity.time}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
+                          <span style={{ color: COLORS.orange }}><Icons.User className="w-4 h-4" /></span>
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-slate-400">Appropriate Age:</span>
+                            <span className="px-2.5 py-0.5 rounded-md bg-brand-orange/10 text-brand-orange font-black">
+                              {activity.ageRange || 'All Ages Welcome'}
+                            </span>
+                          </span>
                         </div>
                       </div>
 
@@ -1345,7 +1354,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
                 <div className="p-8 md:p-10 space-y-6 overflow-y-auto flex-grow">
                   {/* Session Overview */}
-                  <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="flex items-center gap-3">
                       <div style={{ backgroundColor: COLORS.orange }} className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0">
                         <Icons.Calendar className="h-4 w-4" />
@@ -1366,7 +1375,23 @@ export const Activities: React.FC<ActivitiesProps> = ({
                         <p className="text-brand-dark-blue font-black text-sm brand-heading">{selectedActivity.time}</p>
                       </div>
                     </div>
+                    <div className="flex items-center gap-3">
+                      <div style={{ backgroundColor: COLORS.green }} className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0">
+                        <Icons.User className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Appropriate Age</p>
+                        <p className="text-brand-dark-blue font-black text-sm brand-heading">{selectedActivity.ageRange || 'All Ages'}</p>
+                      </div>
+                    </div>
                   </div>
+
+                  {selectedActivity.description && (
+                    <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-100 text-xs text-slate-600 leading-relaxed">
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading mb-1">Session Overview</p>
+                      <p className="font-light">{selectedActivity.description}</p>
+                    </div>
+                  )}
 
                   {/* Weekly Session Date Picker */}
                   {selectedActivity.frequency === 'weekly' && (
@@ -1677,7 +1702,16 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       <p className="text-brand-dark-blue font-black text-sm brand-heading">{viewingInfoActivity.time}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 sm:col-span-2">
+                  <div className="flex items-center gap-3">
+                    <div style={{ backgroundColor: COLORS.orange }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0">
+                      <Icons.User className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest brand-heading">Appropriate Age</p>
+                      <p className="text-brand-dark-blue font-black text-sm brand-heading">{viewingInfoActivity.ageRange || 'All Ages'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
                     <div style={{ backgroundColor: COLORS.green }} className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0">
                       <Icons.MapPin className="h-5 w-5" />
                     </div>

@@ -166,6 +166,7 @@ export interface Activity {
   capacity: number;
   bookedCount: number;
   category: 'youth' | 'community' | 'sports' | 'education';
+  ageRange?: string; // e.g. "Ages 8-12", "Ages 11-16", "All Ages"
   frequency?: 'once' | 'weekly';
   flickrAlbumUrl?: string;
   status: ActivityStatus;

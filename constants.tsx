@@ -182,6 +182,7 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 25,
     bookedCount: 18,
     category: 'youth',
+    ageRange: 'Ages 8-14',
     status: 'upcoming',
     frequency: 'weekly'
   },
@@ -195,6 +196,7 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 15,
     bookedCount: 12,
     category: 'sports',
+    ageRange: 'Ages 11-17',
     status: 'upcoming',
     frequency: 'weekly'
   },
@@ -208,6 +210,7 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 10,
     bookedCount: 4,
     category: 'education',
+    ageRange: 'Ages 14-19',
     status: 'upcoming',
     frequency: 'weekly'
   },
@@ -221,6 +224,7 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 40,
     bookedCount: 32,
     category: 'community',
+    ageRange: 'All Ages Welcome',
     status: 'upcoming',
     frequency: 'weekly'
   },
@@ -234,6 +238,7 @@ export const SAMPLE_ACTIVITIES: Activity[] = [
     capacity: 250,
     bookedCount: 0,
     category: 'community',
+    ageRange: 'All Families & Ages',
     status: 'upcoming_not_bookable',
     frequency: 'once',
     includesFood: true,

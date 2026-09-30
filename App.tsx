@@ -1459,6 +1459,7 @@ const App: React.FC = () => {
             },
             ...(baseActivity.imageUrl ? { imageUrl: baseActivity.imageUrl } : {}),
             ...(baseActivity.flickrAlbumUrl ? { flickrAlbumUrl: baseActivity.flickrAlbumUrl } : {}),
+            ...(baseActivity.ageRange ? { ageRange: baseActivity.ageRange } : {}),
             ...(baseActivity.includesFood !== undefined ? { includesFood: baseActivity.includesFood } : {}),
             ...(baseActivity.foodOptions ? { foodOptions: baseActivity.foodOptions } : {})
           });
