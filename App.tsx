@@ -930,10 +930,32 @@ const App: React.FC = () => {
 
     try {
       await sendPasswordResetEmail(auth, finalEmail);
-      setNotification(`Password reset email sent to ${finalEmail}. Check your inbox!`);
+      
+      // Log to mail collection so admin can view and audit in Mail Monitor
+      try {
+        await addDoc(collection(db, 'mail'), {
+          to: [finalEmail],
+          replyTo: 'jstreet@freeatlast.st',
+          message: {
+            subject: 'Password Reset Request - free@last Hub',
+            text: `Password reset requested for ${finalEmail}. Note: If not received in primary inbox, advise user to check Spam/Junk/Promotions or trigger Manual Password Reset via Admin User Hub.`
+          },
+          status: 'PENDING',
+          type: 'member_forgot_password_request',
+          createdAt: new Date().toISOString()
+        });
+      } catch (logErr) {
+        console.warn("Could not log reset attempt:", logErr);
+      }
+
+      setNotification(`Password reset email sent to ${finalEmail}. Please check your Inbox AND your Spam/Junk or Promotions folder!`);
     } catch (error: any) {
       console.error("Reset error:", error);
-      setNotification("Failed to send reset email. Ensure the email is correct.");
+      if (error?.code === 'auth/user-not-found') {
+        setNotification(`No login account found for ${finalEmail}. Please speak with the hub administrator to activate your account or set a temporary password.`);
+      } else {
+        setNotification("Failed to send reset email. Ensure the email is typed correctly or ask an admin to assist you.");
+      }
     }
   };
 

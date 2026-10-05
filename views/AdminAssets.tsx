@@ -12,6 +12,7 @@ import { AdminAccountOverrideModal } from '../components/AdminAccountOverrideMod
 import { FailedSignupsManager } from '../components/FailedSignupsManager';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { isQuotaError } from '../services/firestoreUtils';
+import { triggerPasswordReset } from '../services/adminAuthService';
 
 import { db } from '../services/firebase';
 import { doc, getDoc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment } from 'firebase/firestore';
@@ -181,6 +182,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   const [editProfileComplete, setEditProfileComplete] = useState<boolean>(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  // Manual Password Reset Modal States
+  const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
+  const [isTriggeringReset, setIsTriggeringReset] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState<{
+    success: boolean;
+    message: string;
+    email: string;
+    timestamp: string;
+    errorCode?: string;
+  } | null>(null);
+  const [copiedResetText, setCopiedResetText] = useState(false);
+
   // Bookings Organization States
   const [activeBookingView, setActiveBookingView] = useState<'by-activity' | 'all-log'>('by-activity');
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
@@ -313,6 +326,96 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       console.error("Error sending mail response:", err);
       setIsSendingMailResponseId(null);
       alert("Failed to send response. Please try again.");
+    }
+  };
+
+  const handleTriggerManualPasswordReset = async (targetUser: User) => {
+    if (!targetUser || !targetUser.email) {
+      alert("No valid email address found for this user.");
+      return;
+    }
+
+    const cleanEmail = targetUser.email.trim().toLowerCase();
+    setIsTriggeringReset(true);
+    setResetFeedback(null);
+    setCopiedResetText(false);
+
+    try {
+      // 1. Call Firebase Auth triggerPasswordReset
+      const authOutcome = await triggerPasswordReset(cleanEmail);
+
+      // 2. Also log an outbound email record to the Firestore 'mail' collection so it's audited and tracked in Mail Monitor
+      try {
+        await addDoc(collection(db, 'mail'), {
+          to: [cleanEmail],
+          replyTo: user.email || 'jstreet@freeatlast.st',
+          message: {
+            subject: 'free@last Community Hub - Password Reset Assistance',
+            text: `Dear ${targetUser.name || 'Member'},\n\nA manual password reset request has been dispatched by the administration team for your free@last account (${cleanEmail}).\n\nIf you requested assistance with your password, please follow the password reset link sent to your inbox. Please be sure to check your Spam, Junk, or Promotions folder.\n\nIf you did not request this or require further assistance, please contact the free@last team.\n\nWarm regards,\nfree@last Nechells Community Team`,
+            html: `
+              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0;">
+                <div style="border-bottom: 3px solid #2b337e; padding-bottom: 14px; margin-bottom: 20px;">
+                  <h2 style="color: #2b337e; margin: 0; font-size: 20px; font-weight: 800; text-transform: uppercase;">free@last Community Hub</h2>
+                  <p style="color: #ea580c; font-size: 12px; margin: 4px 0 0; font-weight: bold; text-transform: uppercase;">Account Security & Password Assistance</p>
+                </div>
+                <p style="font-size: 14px; line-height: 1.6;">Dear <strong>${targetUser.name || 'Member'}</strong>,</p>
+                <p style="font-size: 14px; line-height: 1.6; color: #475569;">
+                  An administrator at free@last has triggered an official password reset email for your account (<strong>${cleanEmail}</strong>).
+                </p>
+                <div style="background: #fff7ed; border-left: 4px solid #ea580c; padding: 14px; margin: 18px 0; border-radius: 8px;">
+                  <p style="margin: 0; font-size: 13px; color: #9a3412; font-weight: 600;">
+                    Please check your email inbox for the reset link. Note: If it does not appear in your primary inbox, please check your <strong>Spam, Junk, or Promotions folder</strong>.
+                  </p>
+                </div>
+                <p style="font-size: 13px; line-height: 1.6; color: #64748b;">
+                  Need further help? Visit us in person at the Nechells Hub or contact the team directly.
+                </p>
+                <div style="border-top: 1px solid #e2e8f0; margin-top: 24px; padding-top: 14px; font-size: 11px; color: #94a3b8;">
+                  free@last Community Hub • Nechells, Birmingham
+                </div>
+              </div>
+            `
+          },
+          status: authOutcome.success ? 'RESOLVED' : 'PENDING',
+          delivery: {
+            state: authOutcome.success ? 'SUCCESS' : 'PENDING',
+            attempts: 1,
+            startTime: new Date(),
+            endTime: new Date(),
+            info: { response: `Triggered by admin ${user.name || user.email}` }
+          },
+          type: 'manual_password_reset',
+          initiatedBy: user.email || 'Admin',
+          createdAt: new Date().toISOString()
+        });
+      } catch (logErr) {
+        console.warn("Could not log reset to mail collection:", logErr);
+      }
+
+      setResetFeedback({
+        success: authOutcome.success,
+        message: authOutcome.message,
+        email: cleanEmail,
+        timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        errorCode: authOutcome.errorCode
+      });
+
+      if (onNotification) {
+        onNotification(authOutcome.success 
+          ? `Password reset email dispatched to ${cleanEmail}!` 
+          : `Password reset notice: ${authOutcome.message}`
+        );
+      }
+    } catch (err: any) {
+      console.error("Manual reset exception:", err);
+      setResetFeedback({
+        success: false,
+        message: err.message || "Failed to trigger password reset.",
+        email: cleanEmail,
+        timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    } finally {
+      setIsTriggeringReset(false);
     }
   };
 
@@ -1716,6 +1819,18 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               className="px-3.5 py-1.5 bg-brand-light-blue text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-sm"
                             >
                               View Details
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setPasswordResetUser(userItem);
+                                setResetFeedback(null);
+                                setCopiedResetText(false);
+                              }}
+                              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[9px] font-bold uppercase tracking-widest active:scale-95 transition-all shadow-sm flex items-center gap-1.5"
+                              title={`Trigger manual password reset for ${userItem.email}`}
+                            >
+                              <Icons.Key className="w-3 h-3" />
+                              <span>Reset Password</span>
                             </button>
                             {userItem.status !== 'approved' && (
                               <button 
@@ -4669,16 +4784,29 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       <Icons.Trash className="w-3.5 h-3.5" /> Delete User Account
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await handleAdminUpdateUser(selectedUserDetail.id, editStatus, editRole, uniqueNumInput, editProfileComplete);
-                      alert("User account saved successfully!");
-                    }}
-                    className="px-6 py-3 bg-brand-orange text-white font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-sm"
-                  >
-                    Save Changes
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasswordResetUser(selectedUserDetail);
+                        setResetFeedback(null);
+                        setCopiedResetText(false);
+                      }}
+                      className="px-5 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl active:scale-95 transition-all shadow-sm flex items-center gap-2"
+                    >
+                      <Icons.Key className="w-3.5 h-3.5" /> Manual Password Reset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleAdminUpdateUser(selectedUserDetail.id, editStatus, editRole, uniqueNumInput, editProfileComplete);
+                        alert("User account saved successfully!");
+                      }}
+                      className="px-6 py-3 bg-brand-orange text-white font-bold brand-heading uppercase tracking-widest text-[10px] rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-sm"
+                    >
+                      Save Changes
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -5531,6 +5659,214 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       {activeAdminTab === 'needs' && (
         <div className="animate-fadeIn">
           <AdminNeedsManager />
+        </div>
+      )}
+
+      {/* Manual Password Reset Modal */}
+      {passwordResetUser && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-brand-dark-blue/80 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl relative border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-8 pb-4 flex justify-between items-start border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                  <Icons.Key className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold brand-heading text-brand-dark-blue uppercase tracking-tight">
+                    Manual Password Reset
+                  </h3>
+                  <p className="text-xs text-slate-500 font-light mt-0.5">
+                    Trigger an immediate password reset email for this user.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setPasswordResetUser(null);
+                  setResetFeedback(null);
+                }}
+                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-8 overflow-y-auto space-y-6">
+              {/* Selected User Summary Card */}
+              <div className="p-5 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">
+                    Selected Account
+                  </span>
+                  <p className="font-bold text-base text-brand-dark-blue brand-heading">
+                    {passwordResetUser.name || 'Member'}
+                  </p>
+                  <p className="text-xs font-mono font-medium text-brand-orange mt-0.5">
+                    {passwordResetUser.email}
+                  </p>
+                </div>
+                <div className="flex sm:flex-col items-center sm:items-end gap-2 shrink-0">
+                  <span className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-brand-dark-blue text-white">
+                    {passwordResetUser.role.toUpperCase()}
+                  </span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[8.5px] font-bold uppercase tracking-wider ${
+                    passwordResetUser.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+                  }`}>
+                    {passwordResetUser.status || 'Pending'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Helpful Guidance Notice */}
+              <div className="p-4 bg-blue-50/70 border border-blue-200/70 rounded-2xl space-y-1.5 text-xs text-blue-900 leading-relaxed">
+                <p className="font-bold flex items-center gap-1.5 text-blue-950">
+                  <span>ℹ️</span> Persistent Email Delivery Issues Guidance:
+                </p>
+                <p className="font-light text-[11.5px]">
+                  When a member (such as <strong>{passwordResetUser.email}</strong>) cannot remember their password and doesn't receive the automated reset email, Gmail or other email providers may classify automated messages as <strong>Spam</strong>, <strong>Junk</strong>, or filter them under <strong>Promotions</strong>.
+                </p>
+                <p className="font-light text-[11.5px]">
+                  Triggering this reset sends an official Firebase Auth reset link and also creates a traceable dispatch record in the <strong>Mail Monitor</strong>.
+                </p>
+              </div>
+
+              {/* Real-time Feedback State */}
+              {resetFeedback && (
+                <div className={`p-5 rounded-2xl border transition-all animate-fadeIn ${
+                  resetFeedback.success
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : 'bg-rose-50 border-rose-200 text-rose-900'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl mt-0.5">{resetFeedback.success ? '✅' : '⚠️'}</span>
+                    <div className="space-y-1.5 flex-grow">
+                      <p className="font-bold text-xs uppercase tracking-wider">
+                        {resetFeedback.success ? 'Password Reset Email Sent' : 'Reset Notice'}
+                      </p>
+                      <p className="text-xs font-light leading-relaxed">
+                        {resetFeedback.message}
+                      </p>
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        Dispatched at {resetFeedback.timestamp} to {resetFeedback.email}
+                      </p>
+
+                      {resetFeedback.success && (
+                        <div className="pt-3 border-t border-emerald-200/60 mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const note = `Hi ${passwordResetUser.name || 'there'},\n\nWe have dispatched a password reset link to your email address (${passwordResetUser.email}) from the free@last Community Hub.\n\nPlease check your Inbox and your Spam/Junk/Promotions folders for the link. Once you click the link, you will be able to set a new password.\n\nWarm regards,\nfree@last Nechells Community Team`;
+                              navigator.clipboard.writeText(note);
+                              setCopiedResetText(true);
+                              setTimeout(() => setCopiedResetText(false), 3000);
+                            }}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-sm"
+                          >
+                            <span>{copiedResetText ? '✓ Copied to Clipboard!' : '📋 Copy Help Text for Member (SMS/WhatsApp)'}</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {!resetFeedback.success && resetFeedback.errorCode === 'auth/user-not-found' && (
+                        <div className="pt-3 border-t border-rose-200/60 mt-3">
+                          <p className="text-[11px] font-bold text-rose-800 mb-2">
+                            No login credentials found in Firebase Auth for this email address.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const target = passwordResetUser;
+                              setPasswordResetUser(null);
+                              setSelectedSignupAttemptForOverride({
+                                email: target.email,
+                                name: target.name,
+                                role: target.role,
+                                mobile: target.profile?.parentMobile || target.profile?.mobileNumber || '',
+                                notes: 'Admin override: Created login credentials for member having password reset issues'
+                              });
+                              setIsAccountOverrideModalOpen(true);
+                            }}
+                            className="px-4 py-2 bg-brand-orange hover:brightness-110 text-white rounded-xl text-[10px] font-black brand-heading uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5"
+                          >
+                            <span>⚡ Provision Login Account & Set Password</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Secondary Option: Direct Temporary Password Override */}
+              <div className="p-4 bg-amber-50/60 border border-amber-200/60 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                  <p className="text-xs font-bold text-amber-900 brand-heading uppercase tracking-wider">
+                    Alternative: Set Temporary Password Directly
+                  </p>
+                  <p className="text-[11px] text-amber-700 font-light mt-0.5">
+                    If the member cannot receive emails at all, you can manually set a temporary password (e.g. <code>Nechells2026!</code>) so they can log in immediately.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = passwordResetUser;
+                    setPasswordResetUser(null);
+                    setSelectedSignupAttemptForOverride({
+                      email: target.email,
+                      name: target.name,
+                      role: target.role,
+                      mobile: target.profile?.parentMobile || target.profile?.mobileNumber || '',
+                      notes: 'Manual password override for member having email delivery issues'
+                    });
+                    setIsAccountOverrideModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[10px] font-bold brand-heading uppercase tracking-wider shrink-0 transition-all shadow-sm"
+                >
+                  ⚡ Direct Override
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <span className="text-[10px] text-slate-400 font-medium">
+                Target: {passwordResetUser.email}
+              </span>
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasswordResetUser(null);
+                    setResetFeedback(null);
+                  }}
+                  className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold brand-heading uppercase tracking-wider hover:bg-slate-100 transition-all flex-1 sm:flex-initial"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  disabled={isTriggeringReset}
+                  onClick={() => handleTriggerManualPasswordReset(passwordResetUser)}
+                  className="px-6 py-2.5 bg-brand-orange hover:brightness-110 text-white rounded-xl text-xs font-black brand-heading uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 flex-1 sm:flex-initial disabled:opacity-50"
+                >
+                  {isTriggeringReset ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Dispatching Email...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Icons.Key className="w-3.5 h-3.5" />
+                      <span>Trigger Reset Email</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

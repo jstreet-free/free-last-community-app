@@ -100,7 +100,7 @@ export const logSignupAttempt = async (attempt: {
 /**
  * Sends a password reset email using Firebase Auth.
  */
-export const triggerPasswordReset = async (email: string): Promise<{ success: boolean; message: string }> => {
+export const triggerPasswordReset = async (email: string): Promise<{ success: boolean; message: string; errorCode?: string }> => {
   try {
     await sendPasswordResetEmail(primaryAuth, email.trim().toLowerCase());
     return { success: true, message: `Password reset email sent successfully to ${email}.` };
@@ -114,7 +114,7 @@ export const triggerPasswordReset = async (email: string): Promise<{ success: bo
     } else if (err.message) {
       msg = err.message;
     }
-    return { success: false, message: msg };
+    return { success: false, message: msg, errorCode: err.code };
   }
 };
 
