@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
-import { Activity, User, isActivityBookable, isActivityUpcoming, getActivityDisplayStatus } from '../types';
+import { Activity, User, WaitlistEntry, isActivityBookable, isActivityUpcoming, getActivityDisplayStatus } from '../types';
+import { hasSessionEnded } from '../services/sessionTime';
+import { getBookedCountForDate } from '../services/bookingCounts';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -23,6 +25,9 @@ interface ActivitiesProps {
   activities: Activity[];
   allBookings: any[];
   setActiveTab: (tab: string) => void;
+  waitlist: WaitlistEntry[];
+  onJoinWaitlist: (details: BookingDetail[]) => void;
+  onLeaveWaitlist: (entryId: string) => void;
 }
 
 export interface AccountMember {
@@ -52,10 +57,15 @@ export const Activities: React.FC<ActivitiesProps> = ({
   hasConfirmedPhotoPolicy, 
   activities, 
   allBookings, 
-  setActiveTab 
+  setActiveTab,
+  waitlist,
+  onJoinWaitlist,
+  onLeaveWaitlist
 }) => {
   const [filter, setFilter] = useState<'all' | 'youth' | 'community' | 'sports' | 'education'>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
+  // Admins are given every booking; everyone else only their own.
+  const hasAllBookings = user?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [bookingStatusFilter, setBookingStatusFilter] = useState<'all' | 'bookable' | 'not_bookable'>('all');
   const [viewMode, setViewMode] = useState<'explore' | 'history'>('explore');
@@ -70,10 +80,9 @@ export const Activities: React.FC<ActivitiesProps> = ({
     if (activity.frequency !== 'weekly') {
       return [activity.date];
     }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Skip occurrences that have already finished (including earlier today).
     let d = parseLocalDate(activity.date);
-    while (d < today) {
+    while (hasSessionEnded(formatLocalDateStr(d), activity.time)) {
       d.setDate(d.getDate() + 7);
     }
     const dates: string[] = [];
@@ -82,7 +91,16 @@ export const Activities: React.FC<ActivitiesProps> = ({
       cur.setDate(d.getDate() + (i * 7));
       dates.push(formatLocalDateStr(cur));
     }
-    return dates;
+    // Also offer any upcoming date that already has bookings but falls outside the weekly pattern
+    // (e.g. an extra session on another day), so members see the same dates as Session Management.
+    const extraDates = new Set<string>([
+      ...Object.entries(activity.sessionBookings || {}).filter(([, n]) => (n || 0) > 0).map(([dateStr]) => dateStr),
+      ...allBookings.filter(b => b.sessionId === activity.id && b.status !== 'cancelled' && b.sessionDate).map(b => b.sessionDate)
+    ]);
+    extraDates.forEach(dateStr => {
+      if (!dates.includes(dateStr) && !hasSessionEnded(dateStr, activity.time)) dates.push(dateStr);
+    });
+    return dates.sort();
   };
 
   const parseLocalDate = (dateStr: string): Date => {
@@ -116,13 +134,10 @@ export const Activities: React.FC<ActivitiesProps> = ({
       };
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
     let occurrenceDate = parseLocalDate(activity.date);
 
-    // If the initial date is in the past, move it forward week by week until it's today or in the future
-    while (occurrenceDate < today) {
+    // Move forward week by week until we reach an occurrence that hasn't finished yet
+    while (hasSessionEnded(formatLocalDateStr(occurrenceDate), activity.time)) {
       occurrenceDate.setDate(occurrenceDate.getDate() + 7);
     }
 
@@ -446,15 +461,17 @@ export const Activities: React.FC<ActivitiesProps> = ({
 
     const effective = getEffectiveSession(selectedActivity);
     const activeDate = selectedSessionDate || effective.date;
-    const occurrenceBookings = allBookings.filter(
-      b => b.sessionId === selectedActivity.id && b.sessionDate === activeDate && b.status !== 'cancelled'
-    );
-    const storedSessionCount = selectedActivity.sessionBookings?.[activeDate] ?? 
-      (selectedActivity.frequency !== 'weekly' || activeDate === selectedActivity.date ? (selectedActivity.bookedCount || 0) : 0);
-    const currentBookedCount = Math.max(storedSessionCount, occurrenceBookings.length);
+    const currentBookedCount = getBookedCountForDate(selectedActivity, activeDate, allBookings, hasAllBookings);
     const remainingSpaces = Math.max(0, selectedActivity.capacity - currentBookedCount);
 
-    if (participants.length > remainingSpaces) {
+    if (hasSessionEnded(activeDate, selectedActivity.time)) {
+      alert(`This session (${activeDate}) has already finished and can no longer be booked.`);
+      return;
+    }
+
+    // A full session goes to the waitlist; a partly full one must fit everyone selected.
+    const joinWaitlist = remainingSpaces === 0;
+    if (!joinWaitlist && participants.length > remainingSpaces) {
       alert(`Sorry, only ${remainingSpaces} space(s) remain for this session date (${activeDate}), but you have ${participants.length} participant(s) selected. Please adjust your selection.`);
       return;
     }
@@ -473,14 +490,25 @@ export const Activities: React.FC<ActivitiesProps> = ({
       foodConflictConfirmed: p.conflictConfirmed,
     }));
 
-    onBook(detailsList);
+    if (joinWaitlist) {
+      onJoinWaitlist(detailsList);
+    } else {
+      onBook(detailsList);
+    }
 
     setSelectedActivity(null);
     setParticipants([]);
     setSelectedMemberIds([]);
   };
 
-  const upcomingActivities = activities.filter(a => isActivityUpcoming(a));
+  // One-off activities that have finished (date and time) are hidden even if their status hasn't been set to 'past'.
+  // Weekly activities recur, so they always have a future occurrence.
+  const isActivityDatePassed = (activity: Activity): boolean => {
+    if (activity.frequency === 'weekly' || !activity.date) return false;
+    return hasSessionEnded(activity.date, activity.time);
+  };
+
+  const upcomingActivities = activities.filter(a => isActivityUpcoming(a) && !isActivityDatePassed(a));
 
   const bookableCount = upcomingActivities.filter(a => isActivityBookable(a)).length;
   const notBookableCount = upcomingActivities.filter(a => !isActivityBookable(a)).length;
@@ -561,6 +589,9 @@ export const Activities: React.FC<ActivitiesProps> = ({
   };
 
   const myBookings = user ? allBookings.filter(b => b.userId === user.id) : [];
+  const myActiveWaitlist = waitlist.filter(w =>
+    w.userId === user?.id && w.status === 'waiting' && !hasSessionEnded(w.sessionDate, w.sessionTime)
+  );
   const sortedMyBookings = [...myBookings].sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime());
 
   // Detect duplicate bookings in user's registrations
@@ -682,6 +713,37 @@ export const Activities: React.FC<ActivitiesProps> = ({
             </div>
           )}
 
+          {myActiveWaitlist.length > 0 && (
+            <div className="bg-amber-50 rounded-3xl p-6 md:p-8 border border-amber-200 space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-amber-900 brand-heading uppercase">My Waitlist</h3>
+                <p className="text-amber-800 text-xs">These sessions are full. We'll contact you if a place becomes available. Please don't attend unless we confirm your booking.</p>
+              </div>
+              <div className="space-y-2">
+                {myActiveWaitlist.map(w => (
+                  <div key={w.id} className="bg-white rounded-2xl border border-amber-100 px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-brand-dark-blue font-black brand-heading text-sm">{w.sessionTitle}</p>
+                      <p className="text-[11px] text-slate-500 font-semibold">
+                        {parseLocalDate(w.sessionDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} • {w.sessionTime} • {w.participantName}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Remove ${w.participantName} from the waitlist for ${w.sessionTitle}?`)) {
+                          onLeaveWaitlist(w.id);
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-red-100 brand-heading"
+                    >
+                      Leave Waitlist
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {sortedMyBookings.length === 0 ? (
             <div className="bg-white rounded-[2.5rem] border border-dashed border-slate-200 py-24 text-center">
               <span className="text-slate-300 block mb-6 text-4xl"><Icons.Calendar /></span>
@@ -760,6 +822,11 @@ export const Activities: React.FC<ActivitiesProps> = ({
                             <span className={`inline-block px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${statusStyle}`}>
                               {statusText}
                             </span>
+                            {b.status === 'cancelled' && b.cancelledReason === 'over_capacity' && (
+                              <p className="text-[10px] text-red-500 font-semibold mt-2 max-w-[220px] mx-auto leading-snug">
+                                This session was overbooked, so this booking was cancelled. You've been added to the waitlist and we'll contact you if a place opens up.
+                              </p>
+                            )}
                           </td>
                           <td className="px-8 py-6 text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -1041,12 +1108,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                 const weekday = getDayOfWeek(activity);
                 
                 // Calculate dynamic booking count for this specific occurrence (excluding cancelled)
-                const occurrenceBookings = allBookings.filter(
-                  b => b.sessionId === activity.id && b.sessionDate === effectiveDate && b.status !== 'cancelled'
-                );
-                const storedSessionCount = activity.sessionBookings?.[effectiveDate] ?? 
-                  (activity.frequency !== 'weekly' || effectiveDate === activity.date ? (activity.bookedCount || 0) : 0);
-                const currentBookedCount = Math.max(storedSessionCount, occurrenceBookings.length);
+                const currentBookedCount = getBookedCountForDate(activity, effectiveDate, allBookings, hasAllBookings);
                 const spacesLeft = Math.max(0, activity.capacity - currentBookedCount);
                 const isOverCapacity = currentBookedCount > activity.capacity;
                 
@@ -1058,6 +1120,9 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   b.status !== 'cancelled'
                 ) : [];
                 const isBooked = occurrenceUserBookings.length > 0;
+                const myWaitlistEntries = waitlist.filter(w =>
+                  w.sessionId === activity.id && w.sessionDate === effectiveDate && w.status === 'waiting'
+                );
 
                 const isFull = spacesLeft === 0;
                 const catColor = getCategoryColor(activity.category);
@@ -1144,6 +1209,19 @@ export const Activities: React.FC<ActivitiesProps> = ({
                             {weekday ? `${weekday}, ` : ''}{formattedDate}
                           </span>
                         </div>
+                        {(() => {
+                          // Extra upcoming sessions on a different day from the usual weekly one.
+                          const extraDates = activity.frequency === 'weekly'
+                            ? getUpcomingWeeklyOccurrences(activity, 6).filter(d => parseLocalDate(d).getDay() !== parseLocalDate(effectiveDate).getDay())
+                            : [];
+                          if (extraDates.length === 0) return null;
+                          return (
+                            <div className="flex items-center gap-3 text-brand-orange font-bold text-[10px] uppercase tracking-wider brand-heading">
+                              <span><Icons.Calendar /></span>
+                              <span>Also: {extraDates.map(d => parseLocalDate(d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })).join(', ')}</span>
+                            </div>
+                          );
+                        })()}
                         <div className="flex items-center gap-3 text-brand-dark-blue font-bold text-[10px] uppercase tracking-wider brand-heading">
                           <span style={{ color: COLORS.orange }}><Icons.Clock /></span>
                           <span>{activity.time}</span>
@@ -1253,16 +1331,35 @@ export const Activities: React.FC<ActivitiesProps> = ({
                                   Attending: {occurrenceUserBookings.map(b => b.participantName).join(', ')}
                                 </p>
                               </div>
+                            ) : isFull && myWaitlistEntries.length > 0 ? (
+                              <div className="flex flex-col items-end gap-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-amber-500 text-white px-3.5 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest brand-heading">
+                                    On Waitlist ({myWaitlistEntries.length})
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Leave the waitlist for ${activity.title}?`)) {
+                                        myWaitlistEntries.forEach(w => onLeaveWaitlist(w.id));
+                                      }
+                                    }}
+                                    className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 border border-red-100 hover:border-red-200 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all brand-heading"
+                                  >
+                                    Leave
+                                  </button>
+                                </div>
+                                <p className="text-[9px] text-slate-400 font-bold truncate max-w-[200px]" title={myWaitlistEntries.map(w => w.participantName).join(', ')}>
+                                  Waiting: {myWaitlistEntries.map(w => w.participantName).join(', ')}
+                                </p>
+                              </div>
                             ) : (
                               <button
-                                disabled={isFull}
                                 onClick={() => handleOpenBooking(bookableActivity)}
-                                style={{ backgroundColor: isFull ? '#e2e8f0' : COLORS.orange }}
-                                className={`px-8 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white transition-all shadow-md active:scale-95 brand-heading ${
-                                  !isFull ? 'hover:brightness-110' : 'cursor-default text-slate-400'
-                                }`}
+                                style={{ backgroundColor: isFull ? '#f59e0b' : COLORS.orange }}
+                                className="px-8 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white transition-all shadow-md active:scale-95 brand-heading hover:brightness-110"
+                                title={isFull ? 'This session is full. Join the waitlist and we will contact you if a place opens up.' : undefined}
                               >
-                                {isFull ? 'Full' : 'Book Now'}
+                                {isFull ? 'Join Waitlist' : 'Book Now'}
                               </button>
                             )}
                           </div>
@@ -1302,14 +1399,10 @@ export const Activities: React.FC<ActivitiesProps> = ({
             : '';
           const effective = getEffectiveSession(selectedActivity);
           const activeSessionDate = selectedSessionDate || effective.date;
-          const occurrenceBookings = allBookings.filter(
-            b => b.sessionId === selectedActivity.id && b.sessionDate === activeSessionDate && b.status !== 'cancelled'
-          );
-          const storedSessionCount = selectedActivity.sessionBookings?.[activeSessionDate] ?? 
-            (selectedActivity.frequency !== 'weekly' || activeSessionDate === selectedActivity.date ? (selectedActivity.bookedCount || 0) : 0);
-          const modalBookedCount = Math.max(storedSessionCount, occurrenceBookings.length);
+          const modalBookedCount = getBookedCountForDate(selectedActivity, activeSessionDate, allBookings, hasAllBookings);
           const remainingSpaces = Math.max(0, selectedActivity.capacity - modalBookedCount);
           const isModalOverCapacity = modalBookedCount > selectedActivity.capacity;
+          const isWaitlistMode = remainingSpaces === 0;
           const upcomingWeeklyDates = selectedActivity.frequency === 'weekly' 
             ? getUpcomingWeeklyOccurrences(selectedActivity, 6) 
             : [selectedActivity.date];
@@ -1338,7 +1431,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                   </button>
                   <div style={{ color: COLORS.yellow }} className="mb-4"><Icons.Calendar /></div>
                   <h2 className="text-2xl md:text-3xl font-black brand-heading uppercase tracking-tight leading-none mb-3">
-                    Confirm Session Registration
+                    {isWaitlistMode ? 'Join the Waitlist' : 'Confirm Session Registration'}
                   </h2>
                   <div className="flex flex-wrap items-center gap-2 text-white/80 font-bold text-xs uppercase tracking-[0.15em] brand-heading">
                     <span className="bg-white/10 px-3 py-1 rounded-lg">{selectedActivity.title}</span>
@@ -1404,9 +1497,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {upcomingWeeklyDates.map(dateStr => {
-                          const occBookings = allBookings.filter(b => b.sessionId === selectedActivity.id && b.sessionDate === dateStr && b.status !== 'cancelled').length;
-                          const stored = selectedActivity.sessionBookings?.[dateStr] ?? (dateStr === selectedActivity.date ? (selectedActivity.bookedCount || 0) : 0);
-                          const booked = Math.max(stored, occBookings);
+                          const booked = getBookedCountForDate(selectedActivity, dateStr, allBookings, hasAllBookings);
                           const spaces = Math.max(0, selectedActivity.capacity - booked);
                           const isFull = spaces <= 0;
                           const isSelected = activeSessionDate === dateStr;
@@ -1614,14 +1705,24 @@ export const Activities: React.FC<ActivitiesProps> = ({
                     />
                   </div>
 
+                  {isWaitlistMode && (
+                    <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl text-amber-900 text-xs leading-relaxed">
+                      <p className="font-black uppercase text-[10px] brand-heading mb-1">This session is full</p>
+                      <p>You can join the waitlist instead. If a place becomes available we'll contact you by email or phone. Joining the waitlist doesn't guarantee a place, so please don't attend unless we confirm your booking.</p>
+                      {selectedActivity.frequency === 'weekly' && (
+                        <p className="mt-2 font-bold">Tip: other weeks above may still have spaces.</p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Submit Button */}
                   <div className="pt-2">
                     <button 
                       onClick={handleConfirmBooking}
-                      style={{ backgroundColor: COLORS.orange }}
+                      style={{ backgroundColor: isWaitlistMode ? '#f59e0b' : COLORS.orange }}
                       className="w-full py-5 rounded-2xl text-white font-black text-sm md:text-base brand-heading uppercase tracking-[0.15em] shadow-xl hover:brightness-110 transition-all active:scale-95"
                     >
-                      Complete Booking ({participants.length} {participants.length === 1 ? 'Person' : 'People'})
+                      {isWaitlistMode ? 'Join Waitlist' : 'Complete Booking'} ({participants.length} {participants.length === 1 ? 'Person' : 'People'})
                     </button>
                   </div>
                 </div>

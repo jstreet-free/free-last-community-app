@@ -1,8 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Icons, COLORS } from '../constants';
 import { ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GripVertical, Check, RefreshCw, ArrowUpDown } from 'lucide-react';
-import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector, getActivityDisplayStatus, isActivityBookable, SignupAttempt } from '../types';
+import { Announcement, Activity as ActivityType, Partner, ImpactStory, Inquiry, Booking, User, UserStatus, GalleryAlbum, TeamLog, MailLog, MoodLog, CaseStudyRequest, CaseStudy, MemberProfile, AuthorizedCollector, getActivityDisplayStatus, isActivityBookable, SignupAttempt, WaitlistEntry } from '../types';
+import { hasSessionEnded } from '../services/sessionTime';
+import { countActiveBookingsForDate, getStoredCountForDate } from '../services/bookingCounts';
 import { MemberWellbeing } from './MemberWellbeing';
 import { SocialImpactPanel } from './SocialImpactPanel';
 import { AdminNewsletterManager } from '../components/AdminNewsletterManager';
@@ -15,7 +17,7 @@ import { isQuotaError } from '../services/firestoreUtils';
 import { triggerPasswordReset } from '../services/adminAuthService';
 
 import { db } from '../services/firebase';
-import { doc, getDoc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, addDoc, updateDoc, writeBatch, serverTimestamp, arrayUnion, increment, runTransaction } from 'firebase/firestore';
 
 interface AdminAssetsProps {
   user: User;
@@ -29,6 +31,7 @@ interface AdminAssetsProps {
   inquiries: Inquiry[];
   bookings: Booking[];
   onDeleteBooking?: (bookingId: string) => void;
+  waitlist?: WaitlistEntry[];
   users: User[];
   teamLogs?: TeamLog[];
   wellbeingLogs?: MoodLog[];
@@ -75,6 +78,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   inquiries,
   bookings,
   onDeleteBooking,
+  waitlist = [],
   users,
   teamLogs = [],
   wellbeingLogs = [],
@@ -198,6 +202,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   const [activeBookingView, setActiveBookingView] = useState<'by-activity' | 'all-log'>('by-activity');
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [selectedSessionDateFilter, setSelectedSessionDateFilter] = useState<string>('all');
+  const activityFormRef = useRef<HTMLDivElement>(null);
   const [bookingTimeframeFilter, setBookingTimeframeFilter] = useState<'all' | 'week' | 'month' | 'year'>('all');
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
   const [activitySearchQuery, setActivitySearchQuery] = useState('');
@@ -1351,6 +1356,255 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
   };
 
+  // For each session date, the active bookings made after the session was already full
+  // (i.e. everyone beyond the first `capacity` bookings, in the order they were made).
+  const getOverCapacityBookings = (act: ActivityType, activityBookings: Booking[]): Booking[] => {
+    if (!act.capacity || act.capacity <= 0) return [];
+    const byDate = new Map<string, Booking[]>();
+    activityBookings.forEach(b => {
+      if (b.status === 'cancelled' || b.sessionId !== act.id) return;
+      const key = b.sessionDate || '';
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key)!.push(b);
+    });
+    const over: Booking[] = [];
+    byDate.forEach(items => {
+      const sorted = [...items].sort((a, b) =>
+        getBookingDateObj(a).getTime() - getBookingDateObj(b).getTime() || a.id.localeCompare(b.id)
+      );
+      over.push(...sorted.slice(act.capacity));
+    });
+    return over;
+  };
+
+  const escapeHtml = (value: string) =>
+    value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+
+  const formatSessionDate = (dateStr: string) =>
+    parseLocalDate(dateStr).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  type WaitlistEmail = { subject: string; reason: string };
+
+  // Cancels the given bookings, puts each person on the waitlist in the order they originally booked,
+  // and emails each family once explaining why. Returns the families that couldn't be emailed.
+  const moveBookingsToWaitlist = async (act: ActivityType, items: Booking[], email: WaitlistEmail): Promise<string[]> => {
+    const usersById = new Map(users.map(u => [u.id, u]));
+    const batch = writeBatch(db);
+    items.forEach(b => {
+      batch.update(doc(db, 'bookings', b.id), { status: 'cancelled', cancelledReason: 'over_capacity' });
+      // Queue them in their original booking order, ahead of anyone who joined the waitlist later.
+      batch.set(doc(collection(db, 'waitlist')), {
+        sessionId: act.id,
+        sessionTitle: b.sessionTitle || act.title,
+        sessionDate: b.sessionDate,
+        sessionTime: b.sessionTime || act.time,
+        participantName: b.participantName,
+        userId: b.userId,
+        bookerName: b.bookerName || '',
+        bookerEmail: usersById.get(b.userId)?.email || '',
+        bookerMobile: b.bookerMobile || '',
+        foodChoice: b.foodChoice || '',
+        foodConflictConfirmed: b.foodConflictConfirmed || false,
+        joinedAt: getBookingDateObj(b),
+        status: 'waiting',
+        fromOverCapacity: true,
+      });
+    });
+    // Set each affected date's counter to the number of active bookings left on it.
+    const sessionCounts: Record<string, number> = {};
+    const removedIds = new Set(items.map(b => b.id));
+    const remaining = (bookings || []).filter(b => !removedIds.has(b.id));
+    items.forEach(b => {
+      sessionCounts[`sessionBookings.${b.sessionDate}`] = countActiveBookingsForDate(remaining, act.id, b.sessionDate);
+    });
+    batch.update(doc(db, 'activities', act.id), {
+      bookedCount: increment(-items.length),
+      ...sessionCounts
+    });
+    await batch.commit();
+
+    // One email per family, covering all of their cancelled participants.
+    const byBooker = new Map<string, Booking[]>();
+    items.forEach(b => {
+      if (!byBooker.has(b.userId)) byBooker.set(b.userId, []);
+      byBooker.get(b.userId)!.push(b);
+    });
+    const notEmailed: string[] = [];
+    for (const [userId, list] of byBooker) {
+      const booker = usersById.get(userId);
+      const bookerName = booker?.name || list[0].bookerName || 'there';
+      const contact = `${bookerName}${list[0].bookerMobile ? ' (' + list[0].bookerMobile + ')' : ''}`;
+      if (!booker?.email) {
+        notEmailed.push(contact);
+        continue;
+      }
+      const itemLines = list.map(b => `${b.participantName}: ${formatSessionDate(b.sessionDate)}${b.sessionTime ? ' at ' + b.sessionTime : ''}`);
+      const nextSteps = "What happens next: we've put you on the waitlist, in the order you originally booked. If a place becomes available we'll contact you straight away. Please don't attend unless we confirm a place.";
+      try {
+        await addDoc(collection(db, 'mail'), {
+          to: [booker.email],
+          replyTo: 'jstreet@freeatlast.co.uk',
+          message: {
+            subject: email.subject,
+            text: `Hi ${bookerName},\n\nWe're sorry, but we've had to cancel your booking for ${act.title}:\n\n${itemLines.join('\n')}\n\nWhy: ${email.reason}\n\n${nextSteps}\n\nWe're very sorry for the inconvenience. If you have any questions, just reply to this email.\n\nfree@last`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; padding: 20px;">
+                <p>Hi ${escapeHtml(bookerName)},</p>
+                <p>We're sorry, but we've had to cancel your booking for <strong>${escapeHtml(act.title)}</strong>:</p>
+                <ul>${itemLines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>
+                <p><strong>Why:</strong> ${escapeHtml(email.reason)}</p>
+                <p><strong>What happens next:</strong> ${escapeHtml(nextSteps.replace('What happens next: ', ''))}</p>
+                <p>We're very sorry for the inconvenience. If you have any questions, just reply to this email.</p>
+                <p>free@last</p>
+              </div>
+            `
+          }
+        });
+      } catch (mailErr) {
+        console.error("Error sending waitlist email:", mailErr);
+        notEmailed.push(contact);
+      }
+    }
+    return notEmailed;
+  };
+
+  const handleRemoveOverCapacityBookings = async (act: ActivityType, overBookings: Booking[]) => {
+    if (overBookings.length === 0) return;
+    const lines = overBookings.map(b =>
+      `• ${b.participantName} (${b.sessionDate}) booked by ${b.bookerName || 'N/A'}${b.bookerMobile ? ', ' + b.bookerMobile : ''} on ${getBookingDateObj(b).toLocaleString('en-GB')}`
+    ).join('\n');
+    if (!window.confirm(`"${act.title}" has a capacity of ${act.capacity}. These ${overBookings.length} booking(s) were made after the session was already full:\n\n${lines}\n\nCancel these bookings now? The earliest ${act.capacity} booking(s) for each date will be kept. Each family will be emailed an explanation and placed on the waitlist in the order they originally booked.`)) {
+      return;
+    }
+
+    try {
+      const notEmailed = await moveBookingsToWaitlist(act, overBookings, {
+        subject: `Update about your booking: ${act.title}`,
+        reason: `a problem with our booking system allowed this session to accept more bookings than it has places for (${act.capacity}). Your booking was made after the session had already filled up, so unfortunately there isn't a place for you. We've fixed the problem so this won't happen again.`
+      });
+      alert(`Cancelled ${overBookings.length} over-capacity booking(s) for "${act.title}" and added them to the waitlist.` +
+        (notEmailed.length > 0 ? `\n\nThese families could not be emailed, please contact them directly:\n${notEmailed.join('\n')}` : '\n\nEach family has been emailed an explanation.'));
+    } catch (err: any) {
+      console.error("Error removing over-capacity bookings:", err);
+      alert("Failed to remove over-capacity bookings: " + (err.message || "Unknown error"));
+    }
+  };
+
+  // The activity, if this booking is on a session date still to come that has more bookings than places.
+  const getOverbookedActivity = (b: Booking): ActivityType | null => {
+    if (b.status === 'cancelled' || !b.sessionId || !b.sessionDate) return null;
+    const act = activities.find(a => a.id === b.sessionId);
+    if (!act || !act.capacity || act.capacity <= 0) return null;
+    if (hasSessionEnded(b.sessionDate, b.sessionTime || act.time)) return null;
+    return countActiveBookingsForDate(bookings || [], act.id, b.sessionDate) > act.capacity ? act : null;
+  };
+
+  // Delete button on a booking. On an overbooked upcoming session the person is moved to the
+  // waitlist and emailed instead of their booking simply disappearing.
+  const handleRemoveBookingClick = async (b: Booking, deleteMessage: string) => {
+    const act = getOverbookedActivity(b);
+    if (!act) {
+      if (window.confirm(deleteMessage)) handleDeleteBooking(b.id);
+      return;
+    }
+    const booked = countActiveBookingsForDate(bookings || [], act.id, b.sessionDate);
+    if (!window.confirm(`"${act.title}" on ${formatSessionDate(b.sessionDate)} is overbooked (${booked} booked for ${act.capacity} places).\n\nRemove ${b.participantName} from this session? Their booking will be cancelled, they'll be added to the waitlist in the order they originally booked, and ${b.bookerName || 'the family'} will be emailed to explain why.`)) {
+      return;
+    }
+    try {
+      const notEmailed = await moveBookingsToWaitlist(act, [b], {
+        subject: `You've been moved to the waitlist: ${act.title}`,
+        reason: `this session ended up with more bookings than it has places for (${booked} bookings for ${act.capacity} places), so we've had to reduce the numbers to keep it safe for everyone. Unfortunately your booking was one we couldn't keep.`
+      });
+      alert(`${b.participantName} has been moved to the waitlist for "${act.title}".` +
+        (notEmailed.length > 0 ? `\n\nWe couldn't email ${notEmailed.join(', ')}. Please contact them directly.` : `\n\n${b.bookerName || 'The family'} has been emailed an explanation.`));
+    } catch (err: any) {
+      console.error("Error moving booking to waitlist:", err);
+      alert("Failed to move booking to the waitlist: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const getWaitlistJoinedTime = (w: WaitlistEntry): number => {
+    if (w.joinedAt?.toDate) return w.joinedAt.toDate().getTime();
+    const d = new Date(w.joinedAt);
+    return isNaN(d.getTime()) ? Date.now() : d.getTime();
+  };
+
+  // Moves a waitlisted person into the session, if there is still room for that date.
+  const handleOfferWaitlistPlace = async (act: ActivityType, entry: WaitlistEntry) => {
+    if (hasSessionEnded(entry.sessionDate, entry.sessionTime || act.time)) {
+      alert("This session has already finished.");
+      return;
+    }
+    if (!window.confirm(`Give ${entry.participantName} a place on "${act.title}" (${entry.sessionDate})?\n\nA booking will be created for them and ${entry.bookerEmail ? entry.bookerEmail + ' will be emailed' : 'they have no email on file, so please phone ' + (entry.bookerMobile || 'them')}.`)) {
+      return;
+    }
+
+    const activeForDate = bookings.filter(b => b.sessionId === act.id && b.sessionDate === entry.sessionDate && b.status !== 'cancelled').length;
+    try {
+      await runTransaction(db, async (tx) => {
+        const activityRef = doc(db, 'activities', act.id);
+        const actSnap = await tx.get(activityRef);
+        const live = actSnap.exists() ? (actSnap.data() as ActivityType) : act;
+        const stored = getStoredCountForDate(live, entry.sessionDate);
+        const booked = Math.max(stored, activeForDate);
+        if (booked >= (live.capacity ?? act.capacity)) {
+          throw new Error(`The session on ${entry.sessionDate} is still full (${booked}/${live.capacity}). Cancel a booking first to free up a place.`);
+        }
+        tx.set(doc(collection(db, 'bookings')), {
+          bookerName: entry.bookerName,
+          participantName: entry.participantName,
+          bookerMobile: entry.bookerMobile || '',
+          bookingDate: serverTimestamp(),
+          sessionTitle: entry.sessionTitle,
+          sessionDate: entry.sessionDate,
+          sessionTime: entry.sessionTime,
+          sessionId: act.id,
+          userId: entry.userId,
+          targetEmail: 'jstreet@freeatlast.co.uk',
+          status: 'booked',
+          foodChoice: entry.foodChoice || '',
+          foodConflictConfirmed: entry.foodConflictConfirmed || false,
+          foodConflictWarningRaised: entry.foodConflictConfirmed || false,
+          fromWaitlist: true,
+        });
+        tx.update(activityRef, {
+          bookedCount: increment(1),
+          [`sessionBookings.${entry.sessionDate}`]: booked + 1
+        });
+        tx.update(doc(db, 'waitlist', entry.id), { status: 'promoted', promotedAt: serverTimestamp() });
+      });
+    } catch (err: any) {
+      alert(err.message || "Could not give this person a place.");
+      return;
+    }
+
+    if (entry.bookerEmail) {
+      try {
+        await addDoc(collection(db, 'mail'), {
+          to: [entry.bookerEmail],
+          replyTo: 'jstreet@freeatlast.co.uk',
+          message: {
+            subject: `Good news: you have a place on ${act.title}`,
+            text: `Hi ${entry.bookerName},\n\nA place has become available and ${entry.participantName} is now booked onto ${act.title} on ${formatSessionDate(entry.sessionDate)}${entry.sessionTime ? ' at ' + entry.sessionTime : ''}.\n\nYou can see the booking under "My Bookings" on the website. If you can no longer make it, please cancel there so we can offer the place to someone else.\n\nfree@last`,
+          }
+        });
+      } catch (mailErr) {
+        console.error("Error sending waitlist place email:", mailErr);
+      }
+    }
+    alert(`${entry.participantName} has been booked onto the session${entry.bookerEmail ? ' and emailed' : ''}.`);
+  };
+
+  const handleRemoveWaitlistEntry = async (entry: WaitlistEntry) => {
+    if (!window.confirm(`Remove ${entry.participantName} from the waitlist for ${entry.sessionDate}?`)) return;
+    try {
+      await deleteDoc(doc(db, 'waitlist', entry.id));
+    } catch (err: any) {
+      alert("Failed to remove from waitlist: " + (err.message || "Unknown error"));
+    }
+  };
+
   const getWeeklySessionOccurrences = (act: ActivityType): { dateStr: string; displayDate: string; isPast: boolean; isToday: boolean; isNext: boolean }[] => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1407,6 +1661,32 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
         isNext
       };
     });
+  };
+
+  // Dates shown on an activity's card in Session Management: every date that has any booking
+  // (so nothing listed under Session Bookings is missing here), plus the next few upcoming dates
+  // so admins can still open an empty register. Upcoming dates come first, then past ones, newest first.
+  const getRegisterTiles = (act: ActivityType, occs: ReturnType<typeof getWeeklySessionOccurrences>) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const bookedDates = new Set((bookings || []).filter(b => b.sessionId === act.id && b.sessionDate).map(b => b.sessionDate));
+    const tiles = [...occs];
+    bookedDates.forEach(dateStr => {
+      if (tiles.some(o => o.dateStr === dateStr)) return;
+      const d = parseLocalDate(dateStr);
+      d.setHours(0, 0, 0, 0);
+      tiles.push({
+        dateStr,
+        displayDate: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
+        isPast: d < today,
+        isToday: d.getTime() === today.getTime(),
+        isNext: false
+      });
+    });
+    const upcoming = tiles.filter(o => !o.isPast).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    const upcomingShown = upcoming.filter((o, i) => i < 4 || bookedDates.has(o.dateStr));
+    const pastShown = tiles.filter(o => o.isPast && bookedDates.has(o.dateStr)).sort((a, b) => b.dateStr.localeCompare(a.dateStr));
+    return [...upcomingShown, ...pastShown];
   };
 
   const handleCreateManualBooking = async (activity: ActivityType, sessionDate: string) => {
@@ -2067,6 +2347,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 };
 
                 const allBookingsForActivity = bookings.filter(b => b.sessionId === selectedActivityId);
+                const overCapacityBookings = getOverCapacityBookings(selectedActivity, allBookingsForActivity);
+                const overCapacityIds = new Set(overCapacityBookings.map(b => b.id));
 
                 const occurrences = getWeeklySessionOccurrences(selectedActivity);
 
@@ -2130,6 +2412,15 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       </button>
 
                       <div className="flex flex-wrap gap-3">
+                        {overCapacityBookings.length > 0 && (
+                          <button
+                            onClick={() => handleRemoveOverCapacityBookings(selectedActivity, overCapacityBookings)}
+                            className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs brand-heading uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-2"
+                            title="Cancel bookings made after the session reached maximum capacity"
+                          >
+                            ⚠️ Remove {overCapacityBookings.length} Over-Capacity Booking{overCapacityBookings.length > 1 ? 's' : ''}
+                          </button>
+                        )}
                         {(() => {
                           const participantCounts = new Map<string, number>();
                           allBookingsForActivity.forEach(b => {
@@ -2335,6 +2626,75 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       </div>
                     </div>
 
+                    {/* Waitlist for this session (filtered to the selected date, if any) */}
+                    {(() => {
+                      const sessionWaitlist = waitlist
+                        .filter(w => w.sessionId === selectedActivity.id && w.status === 'waiting' &&
+                          (selectedSessionDateFilter === 'all' || w.sessionDate === selectedSessionDateFilter) &&
+                          !hasSessionEnded(w.sessionDate, w.sessionTime || selectedActivity.time))
+                        .sort((a, b) => a.sessionDate.localeCompare(b.sessionDate) || getWaitlistJoinedTime(a) - getWaitlistJoinedTime(b));
+                      if (sessionWaitlist.length === 0) return null;
+                      return (
+                        <div className="bg-amber-50 rounded-[2rem] border border-amber-200 p-6 space-y-3">
+                          <div>
+                            <h4 className="text-sm font-black text-amber-900 brand-heading uppercase tracking-wider">Waitlist ({sessionWaitlist.length})</h4>
+                            <p className="text-[11px] text-amber-800">First come, first served. When a place frees up, use "Give Place" on the next person; they'll be booked in and emailed.</p>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs">
+                              <thead>
+                                <tr className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                                  <th className="px-3 py-2">#</th>
+                                  <th className="px-3 py-2">Participant</th>
+                                  <th className="px-3 py-2">Booker & Contact</th>
+                                  <th className="px-3 py-2">Session Date</th>
+                                  <th className="px-3 py-2">Joined</th>
+                                  <th className="px-3 py-2 text-right">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-amber-100">
+                                {sessionWaitlist.map((w, idx) => (
+                                  <tr key={w.id} className="bg-white/70">
+                                    <td className="px-3 py-2 font-black text-amber-900">{idx + 1}</td>
+                                    <td className="px-3 py-2 font-bold text-brand-dark-blue">
+                                      {w.participantName}
+                                      {w.fromOverCapacity && (
+                                        <span className="ml-2 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-200" title="Their booking was cancelled because the session was overbooked">
+                                          Bumped
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2 text-slate-600">
+                                      <p>{w.bookerName}</p>
+                                      <p className="text-[10px] text-slate-400">{[w.bookerEmail, w.bookerMobile].filter(Boolean).join(' • ')}</p>
+                                    </td>
+                                    <td className="px-3 py-2 text-slate-600">{parseLocalDate(w.sessionDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+                                    <td className="px-3 py-2 text-slate-500">{new Date(getWaitlistJoinedTime(w)).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td className="px-3 py-2">
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          onClick={() => handleOfferWaitlistPlace(selectedActivity, w)}
+                                          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[9px] font-black uppercase tracking-wider brand-heading"
+                                        >
+                                          Give Place
+                                        </button>
+                                        <button
+                                          onClick={() => handleRemoveWaitlistEntry(w)}
+                                          className="px-3 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg text-[9px] font-black uppercase tracking-wider brand-heading border border-slate-200"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Dedicated Recording Table */}
                     <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
                       <div className="overflow-x-auto">
@@ -2374,6 +2734,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                         {isDup && (
                                           <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 border border-amber-300">
                                             Duplicate
+                                          </span>
+                                        )}
+                                        {overCapacityIds.has(b.id) && (
+                                          <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-300">
+                                            Over capacity
                                           </span>
                                         )}
                                       </div>
@@ -2434,11 +2799,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                     </td>
                                     <td className="px-6 py-5 text-center">
                                       <button
-                                        onClick={() => {
-                                          if (window.confirm(`Permanently delete booking for "${b.participantName}"?\n\nThis will remove this booking registration record from the system.`)) {
-                                            handleDeleteBooking(b.id);
-                                          }
-                                        }}
+                                        onClick={() => handleRemoveBookingClick(b, `Permanently delete booking for "${b.participantName}"?\n\nThis will remove this booking registration record from the system.`)}
                                         className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-all shadow-sm active:scale-95"
                                         title="Delete booking"
                                       >
@@ -2613,11 +2974,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               </td>
                               <td className="px-6 py-6 text-center">
                                 <button
-                                  onClick={() => {
-                                    if (window.confirm(`Permanently delete booking for "${booking.participantName}" from ${booking.sessionTitle}?`)) {
-                                      handleDeleteBooking(booking.id);
-                                    }
-                                  }}
+                                  onClick={() => handleRemoveBookingClick(booking, `Permanently delete booking for "${booking.participantName}" from ${booking.sessionTitle}?`)}
                                   className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-all shadow-sm active:scale-95"
                                   title="Delete booking"
                                 >
@@ -3860,7 +4217,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
           <div className="space-y-6">
             {(isAddingActivity || editingActivity) && (
-              <div className="bg-slate-50 p-10 rounded-[2.5rem] border-2 border-brand-orange/20 animate-slideIn">
+              <div ref={activityFormRef} className="scroll-mt-24 bg-slate-50 p-10 rounded-[2.5rem] border-2 border-brand-orange/20 animate-slideIn">
                 <h3 className="text-xl font-bold brand-heading uppercase text-brand-dark-blue mb-8">
                   {editingActivity ? "Edit Session" : "Create New Session"}
                 </h3>
@@ -4007,9 +4364,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
                         {getWeeklySessionOccurrences(editingActivity).slice(0, 6).map(occ => {
-                          const occBookings = (bookings || []).filter(b => b.sessionId === editingActivity.id && b.sessionDate === occ.dateStr && b.status !== 'cancelled').length;
-                          const storedCount = editingActivity.sessionBookings?.[occ.dateStr] ?? 0;
-                          const effectiveCount = Math.max(occBookings, storedCount);
+                          const effectiveCount = countActiveBookingsForDate(bookings || [], editingActivity.id, occ.dateStr);
                           const isOver = (editingActivity.capacity || 0) > 0 && effectiveCount > (editingActivity.capacity || 0);
 
                           return (
@@ -4111,9 +4466,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 if (!isActivityBookable(act) || (act.capacity || 0) <= 0) return;
                 const occs = getWeeklySessionOccurrences(act);
                 occs.forEach(occ => {
-                  const occBookings = (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === occ.dateStr && b.status !== 'cancelled').length;
-                  const stored = act.sessionBookings?.[occ.dateStr] ?? (act.frequency !== 'weekly' || occ.dateStr === act.date ? (act.bookedCount || 0) : 0);
-                  const count = Math.max(occBookings, stored);
+                  // Sessions that have already finished can't be fixed any more, so don't warn about them.
+                  if (hasSessionEnded(occ.dateStr, act.time)) return;
+                  const count = countActiveBookingsForDate(bookings || [], act.id, occ.dateStr);
                   if (count > act.capacity) {
                     overCapacityOccurrences.push({
                       activity: act,
@@ -4179,6 +4534,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 const isBookable = isActivityBookable(act);
                 const allActBookings = (bookings || []).filter(b => b.sessionId === act.id && b.status !== 'cancelled');
                 const occs = getWeeklySessionOccurrences(act);
+                const registerTiles = getRegisterTiles(act, occs);
 
                 // Effective next session date for top indicator
                 const today = new Date();
@@ -4187,16 +4543,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 while (occDate < today && act.frequency === 'weekly') occDate.setDate(occDate.getDate() + 7);
                 const effectiveDateStr = formatLocalDateStr(occDate);
                 
-                const currentOccBookings = allActBookings.filter(b => b.sessionDate === effectiveDateStr).length;
-                const storedCount = act.sessionBookings?.[effectiveDateStr] ?? 
-                  (act.frequency !== 'weekly' || effectiveDateStr === act.date ? (act.bookedCount || 0) : 0);
-                const effectiveBookedCount = Math.max(currentOccBookings, storedCount);
+                const effectiveBookedCount = allActBookings.filter(b => b.sessionDate === effectiveDateStr).length;
 
-                // Check if any occurrence is over capacity
-                const hasAnyOverCapacity = act.capacity > 0 && occs.some(o => {
-                  const bCount = allActBookings.filter(b => b.sessionDate === o.dateStr).length;
-                  const sCount = act.sessionBookings?.[o.dateStr] ?? (act.frequency !== 'weekly' || o.dateStr === act.date ? (act.bookedCount || 0) : 0);
-                  return Math.max(bCount, sCount) > act.capacity;
+                // Check if any occurrence that hasn't finished yet is over capacity
+                const hasAnyOverCapacity = act.capacity > 0 && registerTiles.some(o => {
+                  return !hasSessionEnded(o.dateStr, act.time) && allActBookings.filter(b => b.sessionDate === o.dateStr).length > act.capacity;
                 });
 
                 return (
@@ -4288,6 +4639,8 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                           onClick={() => {
                             setIsAddingActivity(false);
                             setEditingActivity(act);
+                            // The edit form sits at the top of this tab, so bring it into view.
+                            requestAnimationFrame(() => activityFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
                           }}
                           className="px-5 py-3 bg-brand-orange text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all shadow-md hover:brightness-110 active:scale-95"
                         >
@@ -4307,7 +4660,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                     </div>
 
                     {/* Dated Weekly Sessions Registers Section */}
-                    {isBookable && (
+                    {(isBookable || registerTiles.length > 0) && (
                       <div className="pt-4 border-t border-slate-100">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
                           <div>
@@ -4323,11 +4676,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
                         {/* List of Dated Weekly Occurrences */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                          {occs.slice(0, 8).map(occ => {
+                          {registerTiles.map(occ => {
                             const occBookings = allActBookings.filter(b => b.sessionDate === occ.dateStr);
-                            const stored = act.sessionBookings?.[occ.dateStr] ?? (act.frequency !== 'weekly' || occ.dateStr === act.date ? (act.bookedCount || 0) : 0);
-                            const count = Math.max(occBookings.length, stored);
-                            const isOver = act.capacity > 0 && count > act.capacity;
+                            const cancelledCount = (bookings || []).filter(b => b.sessionId === act.id && b.sessionDate === occ.dateStr && b.status === 'cancelled').length;
+                            const count = occBookings.length;
+                            const hasEnded = hasSessionEnded(occ.dateStr, act.time);
+                            const isOver = !hasEnded && act.capacity > 0 && count > act.capacity;
                             const isFull = act.capacity > 0 && count === act.capacity;
                             const spacesRemaining = Math.max(0, act.capacity - count);
 
@@ -4363,6 +4717,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                         Next
                                       </span>
                                     )}
+                                    {occ.isPast && (
+                                      <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-slate-200 text-slate-600">
+                                        Past
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="flex items-center justify-between text-xs mt-1">
                                     <span className="text-[10px] text-slate-500 font-medium">Booked:</span>
@@ -4372,10 +4731,17 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                       {count} / {act.capacity}
                                     </span>
                                   </div>
+                                  {cancelledCount > 0 && (
+                                    <p className="text-[9px] text-slate-400 font-semibold mt-0.5">+ {cancelledCount} cancelled</p>
+                                  )}
                                 </div>
 
                                 <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex justify-between items-center text-[10px]">
-                                  {isOver ? (
+                                  {hasEnded ? (
+                                    <span className="text-slate-400 font-semibold">
+                                      Finished
+                                    </span>
+                                  ) : isOver ? (
                                     <span className="text-red-600 font-extrabold flex items-center gap-1">
                                       ⚠️ Over by {count - act.capacity}!
                                     </span>
@@ -4402,6 +4768,49 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 );
               })}
             </div>
+
+            {/* Bookings whose activity no longer exists still show under Session Bookings, so list them here too. */}
+            {(() => {
+              const activityIds = new Set(activities.map(a => a.id));
+              const orphanGroups = new Map<string, Booking[]>();
+              (bookings || []).forEach(b => {
+                if (!b.sessionId || activityIds.has(b.sessionId)) return;
+                orphanGroups.set(b.sessionId, [...(orphanGroups.get(b.sessionId) || []), b]);
+              });
+              if (orphanGroups.size === 0) return null;
+              return (
+                <div className="mt-8 bg-slate-50 p-6 rounded-[2rem] border border-dashed border-slate-300">
+                  <h4 className="text-xs font-black text-brand-dark-blue brand-heading uppercase tracking-wider">Bookings for Deleted Sessions</h4>
+                  <p className="text-[11px] text-slate-500 mt-1 mb-4">These bookings belong to sessions that are no longer in Session Management. Open one to see its register.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {Array.from(orphanGroups.entries()).map(([sessionId, list]) => {
+                      const active = list.filter(b => b.status !== 'cancelled').length;
+                      const dates = Array.from(new Set(list.map(b => b.sessionDate).filter(Boolean))).sort();
+                      return (
+                        <button
+                          key={sessionId}
+                          type="button"
+                          onClick={() => {
+                            setActiveAdminTab('bookings');
+                            setActiveBookingView('by-activity');
+                            setSelectedActivityId(sessionId);
+                            setSelectedSessionDateFilter('all');
+                          }}
+                          className="text-left p-4 bg-white rounded-2xl border border-slate-200 hover:border-brand-orange/40 hover:shadow-md transition-all"
+                        >
+                          <p className="font-extrabold text-brand-dark-blue brand-heading text-xs line-clamp-1">{list[0].sessionTitle || 'Unknown Session'}</p>
+                          <p className="text-[10px] text-slate-500 font-semibold mt-1">
+                            {active} booking{active !== 1 ? 's' : ''}{list.length > active ? ` (+ ${list.length - active} cancelled)` : ''}
+                            {dates.length > 0 && ` • ${dates.length === 1 ? formatSessionDate(dates[0]) : `${formatSessionDate(dates[0])} – ${formatSessionDate(dates[dates.length - 1])}`}`}
+                          </p>
+                          <span className="text-brand-orange font-bold uppercase tracking-wider text-[9px] mt-2 inline-block">Open Register →</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -5192,11 +5601,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                                   </td>
                                   <td className="px-6 py-4 text-center">
                                     <button
-                                      onClick={() => {
-                                        if (window.confirm(`Permanently delete booking for "${b.participantName}" from ${b.sessionTitle}?`)) {
-                                          handleDeleteBooking(b.id);
-                                        }
-                                      }}
+                                      onClick={() => handleRemoveBookingClick(b, `Permanently delete booking for "${b.participantName}" from ${b.sessionTitle}?`)}
                                       className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-all shadow-sm active:scale-95"
                                       title="Delete booking"
                                     >

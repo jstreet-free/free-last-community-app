@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { Home } from './views/Home';
-import { Activities } from './views/Activities';
+import { Activities, BookingDetail } from './views/Activities';
 import { Gallery } from './views/Gallery';
 import { VolunteerLogView } from './views/VolunteerLog';
 import { MemberWellbeing } from './views/MemberWellbeing';
@@ -17,11 +17,11 @@ import { MemberSupportWidget } from './components/MemberSupportWidget';
 import { MemberProfileEditor } from './components/MemberProfileEditor';
 import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
 import { LoginPortal } from './components/LoginPortal';
-import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy, SignupAttempt } from './types';
+import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy, SignupAttempt, WaitlistEntry } from './types';
 import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
 import { db, auth } from './services/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc, getDocs, where, increment } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc, getDocs, where, increment, runTransaction } from 'firebase/firestore';
 import { 
   signInAnonymously, 
   signOut, 
@@ -29,11 +29,14 @@ import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  sendEmailVerification,
   setPersistence,
   browserLocalPersistence
 } from 'firebase/auth';
 
 import { handleFirestoreError, OperationType, isQuotaError } from './services/firestoreUtils';
+import { hasSessionEnded } from './services/sessionTime';
+import { countActiveBookingsForDate, getStoredCountForDate } from './services/bookingCounts';
 import { recordAppVisit } from './services/analyticsService';
 import { logSignupAttempt } from './services/adminAuthService';
 
@@ -55,6 +58,9 @@ export const safeSetStorage = (key: string, value: string) => {
     }
   }
 };
+
+// Thrown inside the booking transaction when the session has no room left.
+class CapacityError extends Error {}
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -86,7 +92,7 @@ const App: React.FC = () => {
             let userData = { ...userSnap.data(), id: firebaseUser.uid } as User;
             
             // Force admin status for owner
-            if (firebaseUser.email?.toLowerCase() === 'jstreet@freeatlast.st' && (userData.role !== 'admin' || !userData.profileComplete)) {
+            if (firebaseUser.email?.toLowerCase() === 'jstreet@freeatlast.st' && firebaseUser.emailVerified && (userData.role !== 'admin' || !userData.profileComplete)) {
               userData = { ...userData, role: 'admin', profileComplete: true, status: 'approved' };
               try {
                 await updateDoc(userRef, { role: 'admin', profileComplete: true, status: 'approved' });
@@ -130,11 +136,12 @@ const App: React.FC = () => {
             setUser(userData);
             safeSetStorage('freeatlast_v2_user', JSON.stringify(userData));
           } else {
-            // User authenticated but not found in Firestore. Check cache.
+            // User authenticated but not found in Firestore. Check cache, but never restore an
+            // admin/team role from it: the database has no record granting that role.
             const saved = localStorage.getItem('freeatlast_v2_user');
             if (saved) {
               const cachedUser = JSON.parse(saved);
-              if (cachedUser.id === firebaseUser.uid) {
+              if (cachedUser.id === firebaseUser.uid && cachedUser.role !== 'admin' && cachedUser.role !== 'team') {
                 setUser(cachedUser);
                 return;
               }
@@ -244,10 +251,13 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('cached_inquiries');
     return saved ? JSON.parse(saved) : [];
   });
+  // True once the admin's bookings list comes from the server rather than a cache.
+  const [registrationsLive, setRegistrationsLive] = useState(false);
   const [sessionRegistrations, setSessionRegistrations] = useState<Booking[]>(() => {
     const saved = localStorage.getItem('cached_session_registrations');
     return saved ? JSON.parse(saved) : [];
   });
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [userRegistrations, setUserRegistrations] = useState<Booking[]>(() => {
     const saved = localStorage.getItem('cached_user_registrations');
     return saved ? JSON.parse(saved) : [];
@@ -522,6 +532,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (user?.role !== 'admin') {
       setSessionRegistrations([]);
+      setRegistrationsLive(false);
       return;
     }
     const unsubscribe = onSnapshot(query(collection(db, 'bookings'), orderBy('bookingDate', 'desc')), (snapshot) => {
@@ -530,11 +541,13 @@ const App: React.FC = () => {
         items.push({ id: doc.id, ...doc.data() } as Booking);
       });
       setSessionRegistrations(items);
+      setRegistrationsLive(!snapshot.metadata.fromCache);
       safeSetStorage('cached_session_registrations', JSON.stringify(items));
     }, (error) => {
       if (isQuotaError(error)) {
         console.warn("Session registrations snapshot quota reached; using cached registrations.");
         setIsQuotaExceeded(true);
+        setRegistrationsLive(false);
         const saved = localStorage.getItem('cached_session_registrations');
         if (saved) {
           try { setSessionRegistrations(JSON.parse(saved)); } catch {}
@@ -545,6 +558,33 @@ const App: React.FC = () => {
     });
     return () => unsubscribe();
   }, [user?.role]);
+
+  // Keep each activity's per-date counter in line with the real bookings. Members can only see their
+  // own bookings, so spaces left for them come from this counter, and it can drift (older code filled
+  // a weekly activity's first date with its all-weeks total). Only live data is used, so a stale cache
+  // can't wipe out real bookings, and it waits a moment so a booking's two updates can both arrive.
+  useEffect(() => {
+    if (user?.role !== 'admin' || !registrationsLive) return;
+    const timer = setTimeout(() => {
+      activities.forEach(act => {
+        const dates = new Set<string>([
+          ...Object.keys(act.sessionBookings || {}),
+          ...sessionRegistrations.filter(b => b.sessionId === act.id).map(b => b.sessionDate)
+        ]);
+        const fixes: Record<string, number> = {};
+        dates.forEach(dateStr => {
+          if (!dateStr || dateStr.includes('.')) return;
+          const actual = countActiveBookingsForDate(sessionRegistrations, act.id, dateStr);
+          if (act.sessionBookings?.[dateStr] !== actual) fixes[`sessionBookings.${dateStr}`] = actual;
+        });
+        if (Object.keys(fixes).length === 0) return;
+        updateDoc(doc(db, 'activities', act.id), fixes).catch(err =>
+          console.warn(`Could not correct booking counts for ${act.title}:`, err)
+        );
+      });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [user?.role, registrationsLive, activities, sessionRegistrations]);
 
   // Sync current user's personal bookings (for highlight UI and recurring logic)
   useEffect(() => {
@@ -583,6 +623,29 @@ const App: React.FC = () => {
     });
     return () => unsubscribe();
   }, [user?.id]);
+
+  // Sync waitlist: admins see every entry, everyone else only their own.
+  useEffect(() => {
+    if (!user?.id) {
+      setWaitlist([]);
+      return;
+    }
+    const q = user.role === 'admin'
+      ? query(collection(db, 'waitlist'))
+      : query(collection(db, 'waitlist'), where('userId', '==', user.id));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: WaitlistEntry[] = [];
+      snapshot.forEach(d => items.push({ id: d.id, ...d.data() } as WaitlistEntry));
+      setWaitlist(items);
+    }, (error) => {
+      if (isQuotaError(error)) {
+        setIsQuotaExceeded(true);
+      } else {
+        console.error("Waitlist snapshot error:", error);
+      }
+    });
+    return () => unsubscribe();
+  }, [user?.id, user?.role]);
 
   // Sync users from Firestore (Admin only)
   useEffect(() => {
@@ -931,11 +994,13 @@ const App: React.FC = () => {
     try {
       await sendPasswordResetEmail(auth, finalEmail);
       
-      // Log to mail collection so admin can view and audit in Mail Monitor
+      // Log to mail collection so admin can view and audit in Mail Monitor. This goes to the
+      // office inbox (not the typed address): visitors may only email free@last staff.
       try {
         await addDoc(collection(db, 'mail'), {
-          to: [finalEmail],
-          replyTo: 'jstreet@freeatlast.st',
+          to: ['jstreet@freeatlast.co.uk'],
+          requestedFor: finalEmail,
+          replyTo: finalEmail,
           message: {
             subject: 'Password Reset Request - free@last Hub',
             text: `Password reset requested for ${finalEmail}. Note: If not received in primary inbox, advise user to check Spam/Junk/Promotions or trigger Manual Password Reset via Admin User Hub.`
@@ -1027,6 +1092,19 @@ const App: React.FC = () => {
       let userData: User | null = null;
       let userDocExists = false;
 
+      // The owner email only becomes admin once its inbox is verified (the database rules enforce
+      // the same), otherwise anyone could sign up with that address and claim admin.
+      const isOwnerEmailLogin = email?.toLowerCase() === 'jstreet@freeatlast.st';
+      const ownerVerified = isOwnerEmailLogin && !!auth.currentUser?.emailVerified;
+      if (isOwnerEmailLogin && !ownerVerified && auth.currentUser) {
+        try {
+          await sendEmailVerification(auth.currentUser);
+          setNotification(`Admin access for ${email} needs a verified inbox. We've sent a verification link; click it, then log out and back in.`);
+        } catch (verifyErr) {
+          console.warn("Could not send verification email:", verifyErr);
+        }
+      }
+
       try {
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
@@ -1083,8 +1161,8 @@ const App: React.FC = () => {
         let updatedRole = userData.role;
         let updatedStatus = userData.status;
         
-        // Special case for owner email
-        if (email?.toLowerCase() === 'jstreet@freeatlast.st') {
+        // Special case for owner email (verified inbox only)
+        if (ownerVerified) {
           updatedRole = 'admin';
           updatedStatus = 'approved';
         } else if (isSignUp) {
@@ -1121,7 +1199,11 @@ const App: React.FC = () => {
             if (isQuotaError(upErr)) {
               console.warn("User update saved locally (cloud quota reached)");
             } else {
+              // The database refused the change (e.g. an admin upgrade that isn't allowed),
+              // so keep the role and status it actually holds.
               console.error("Error updating user document:", upErr);
+              updatedRole = userData.role;
+              updatedStatus = userData.status;
             }
           }
         }
@@ -1143,7 +1225,7 @@ const App: React.FC = () => {
         else setActiveTab(userData.profileComplete ? 'home' : 'registration');
       } else {
         // New user creation
-        const isOwner = email?.toLowerCase() === 'jstreet@freeatlast.st';
+        const isOwner = ownerVerified;
         const finalRole = isOwner ? 'admin' : role;
         const finalStatus = isOwner ? 'approved' : (finalRole === 'friend' ? 'approved' : (finalRole === 'admin' ? 'approved' : 'pending'));
 
@@ -1177,7 +1259,15 @@ const App: React.FC = () => {
           if (isQuotaError(setErr)) {
             console.warn("User creation saved locally (cloud quota reached)");
           } else {
+            // The database refused this account (e.g. an Admin signup from an email that isn't
+            // authorised). Don't carry on with a role the database never granted.
             console.error("Error creating user document:", setErr);
+            await signOut(auth);
+            const msg = finalRole === 'admin'
+              ? "Admin accounts can only be created by authorised free@last staff. Please sign up as a member or team volunteer, or ask an existing admin to give you access."
+              : "We couldn't create your account. Please try again.";
+            setNotification(msg);
+            return { success: false, error: msg };
           }
         }
         setUser(newUser);
@@ -1291,6 +1381,13 @@ const App: React.FC = () => {
     const activityDate = targetActivity.date; // effective session date
     const numParticipants = detailsList.length;
 
+    if (hasSessionEnded(activityDate, targetActivity.time)) {
+      const msg = `"${targetActivity.title}" on ${activityDate} has already finished, so it can no longer be booked.`;
+      setNotification(msg);
+      alert(msg);
+      return;
+    }
+
     // Strict Capacity Enforcement to prevent overbooking:
     let maxCapacity = targetActivity.capacity ?? 20;
     let currentBooked = 0;
@@ -1298,9 +1395,7 @@ const App: React.FC = () => {
     const localAct = activities.find(a => a.id === activityId);
     if (localAct) {
       maxCapacity = localAct.capacity ?? maxCapacity;
-      const countMap = localAct.sessionBookings || {};
-      currentBooked = countMap[activityDate] ?? 
-        (localAct.frequency !== 'weekly' || activityDate === localAct.date ? (localAct.bookedCount || 0) : 0);
+      currentBooked = getStoredCountForDate(localAct, activityDate);
     }
 
     // Check active non-cancelled registrations in sessionRegistrations
@@ -1315,9 +1410,7 @@ const App: React.FC = () => {
       if (actSnap.exists()) {
         const d = actSnap.data() as Activity;
         maxCapacity = d.capacity ?? maxCapacity;
-        const liveCounts = d.sessionBookings || {};
-        const liveDateCount = liveCounts[activityDate] ?? 
-          (d.frequency !== 'weekly' || activityDate === d.date ? (d.bookedCount || 0) : 0);
+        const liveDateCount = getStoredCountForDate({ ...d, id: activityId }, activityDate);
         currentBooked = Math.max(currentBooked, liveDateCount);
       }
     } catch (e) {
@@ -1337,6 +1430,86 @@ const App: React.FC = () => {
     const path = 'bookings';
     const createdBookingIds: string[] = [];
     try {
+      // Re-check capacity and create the bookings in a single transaction, so two people
+      // booking at the same moment can't both take the last remaining places.
+      try {
+        await runTransaction(db, async (tx) => {
+          createdBookingIds.length = 0;
+          const activityRef = doc(db, 'activities', activityId);
+          const activitySnap = await tx.get(activityRef);
+          const baseActivity = activitySnap.exists()
+            ? (activitySnap.data() as Activity)
+            : (activities.find(a => a.id === activityId) || targetActivity);
+
+          const capacity = baseActivity.capacity ?? maxCapacity;
+          const storedForDate = getStoredCountForDate(baseActivity, activityDate);
+          const bookedForDate = Math.max(storedForDate, confirmedInState);
+          const remaining = Math.max(0, capacity - bookedForDate);
+          if (numParticipants > remaining) {
+            throw new CapacityError(remaining <= 0
+              ? `This session is fully booked (Maximum capacity: ${capacity}). No additional registrations can be accepted.`
+              : `Capacity limit reached: Only ${remaining} space(s) remain for "${targetActivity.title}" on ${activityDate}, but you attempted to register ${numParticipants} participant(s). Please reduce your selection.`);
+          }
+
+          for (const detail of detailsList) {
+            const bookingRef = doc(collection(db, path));
+            tx.set(bookingRef, {
+              bookerName: user.name,
+              participantName: detail.participantName,
+              bookerMobile: detail.bookerMobile,
+              bookingDate: serverTimestamp(),
+              sessionTitle: detail.activity.title,
+              sessionDate: detail.activity.date,
+              sessionTime: detail.activity.time,
+              sessionId: detail.activity.id,
+              userId: user.id,
+              targetEmail: 'jstreet@freeatlast.co.uk',
+              status: 'booked',
+              foodChoice: detail.foodChoice || '',
+              foodConflictConfirmed: detail.foodConflictConfirmed || false,
+              foodConflictWarningRaised: detail.foodConflictConfirmed || false,
+            });
+            createdBookingIds.push(bookingRef.id);
+          }
+
+          if (activitySnap.exists()) {
+            tx.update(activityRef, {
+              bookedCount: increment(numParticipants),
+              [`sessionBookings.${activityDate}`]: bookedForDate + numParticipants
+            });
+          } else {
+            tx.set(activityRef, {
+              title: baseActivity.title,
+              description: baseActivity.description,
+              date: baseActivity.date,
+              time: baseActivity.time,
+              location: baseActivity.location || 'The Hub',
+              capacity: baseActivity.capacity || 20,
+              bookedCount: (baseActivity.bookedCount || 0) + numParticipants,
+              category: baseActivity.category || 'community',
+              status: baseActivity.status || 'upcoming',
+              frequency: baseActivity.frequency || 'once',
+              sessionBookings: {
+                ...(baseActivity.sessionBookings || {}),
+                [activityDate]: bookedForDate + numParticipants
+              },
+              ...(baseActivity.imageUrl ? { imageUrl: baseActivity.imageUrl } : {}),
+              ...(baseActivity.flickrAlbumUrl ? { flickrAlbumUrl: baseActivity.flickrAlbumUrl } : {}),
+              ...(baseActivity.ageRange ? { ageRange: baseActivity.ageRange } : {}),
+              ...(baseActivity.includesFood !== undefined ? { includesFood: baseActivity.includesFood } : {}),
+              ...(baseActivity.foodOptions ? { foodOptions: baseActivity.foodOptions } : {})
+            });
+          }
+        });
+      } catch (txErr) {
+        if (txErr instanceof CapacityError) {
+          setNotification(txErr.message);
+          alert(txErr.message);
+          return;
+        }
+        throw txErr;
+      }
+
       for (const detail of detailsList) {
         // Raise a warning note with admin if they confirmed against their medical/dietary info
         if (detail.foodConflictConfirmed) {
@@ -1392,105 +1565,41 @@ const App: React.FC = () => {
           }
         }
 
-        // 1. Save to global bookings collection for admin log
-        const bookingDocRef = await addDoc(collection(db, path), {
-          bookerName: user.name,
-          participantName: detail.participantName,
-          bookerMobile: detail.bookerMobile,
-          bookingDate: serverTimestamp(),
-          sessionTitle: detail.activity.title,
-          sessionDate: detail.activity.date,
-          sessionTime: detail.activity.time,
-          sessionId: detail.activity.id,
-          userId: user.id,
-          targetEmail: 'jstreet@freeatlast.co.uk',
-          status: 'booked',
-          foodChoice: detail.foodChoice || '',
-          foodConflictConfirmed: detail.foodConflictConfirmed || false,
-          foodConflictWarningRaised: detail.foodConflictConfirmed || false,
-        });
-        createdBookingIds.push(bookingDocRef.id);
-
-        // 2. Trigger email for the booking
-        await addDoc(collection(db, 'mail'), {
-          to: ['jstreet@freeatlast.co.uk'],
-          replyTo: user.email,
-          message: {
-            subject: `New Booking: ${detail.activity.title}`,
-            text: `Booking for ${detail.activity.title}\nParticipant: ${detail.participantName}\nDate: ${detail.activity.date}\nTime: ${detail.activity.time}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
-            html: `
-              <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
-                <h2 style="color: #2b337e;">New Activity Booking</h2>
-                <p>A new registration has been received for <strong>${detail.activity.title}</strong>.</p>
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-                <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
-                  <p style="margin: 5px 0;"><strong>Session:</strong> ${detail.activity.title}</p>
-                  <p style="margin: 5px 0;"><strong>Session Date:</strong> ${detail.activity.date}</p>
-                  <p style="margin: 5px 0;"><strong>Session Time:</strong> ${detail.activity.time}</p>
-                  <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${detail.participantName}</p>
-                  <p style="margin: 5px 0;"><strong>Booked By:</strong> ${user.name}</p>
-                  <p style="margin: 5px 0;"><strong>Mobile:</strong> ${detail.bookerMobile}</p>
-                  <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+        // Trigger email for the booking. The booking is already saved, so a mail failure isn't fatal.
+        try {
+          await addDoc(collection(db, 'mail'), {
+            to: ['jstreet@freeatlast.co.uk'],
+            replyTo: user.email,
+            message: {
+              subject: `New Booking: ${detail.activity.title}`,
+              text: `Booking for ${detail.activity.title}\nParticipant: ${detail.participantName}\nDate: ${detail.activity.date}\nTime: ${detail.activity.time}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
+                  <h2 style="color: #2b337e;">New Activity Booking</h2>
+                  <p>A new registration has been received for <strong>${detail.activity.title}</strong>.</p>
+                  <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                  <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                    <p style="margin: 5px 0;"><strong>Session:</strong> ${detail.activity.title}</p>
+                    <p style="margin: 5px 0;"><strong>Session Date:</strong> ${detail.activity.date}</p>
+                    <p style="margin: 5px 0;"><strong>Session Time:</strong> ${detail.activity.time}</p>
+                    <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${detail.participantName}</p>
+                    <p style="margin: 5px 0;"><strong>Booked By:</strong> ${user.name}</p>
+                    <p style="margin: 5px 0;"><strong>Mobile:</strong> ${detail.bookerMobile}</p>
+                    <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+                  </div>
+                  <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+                    System generated booking alert
+                  </p>
                 </div>
-                <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                  System generated booking alert
-                </p>
-              </div>
-            `
-          }
-        });
-      }
-
-      // 3. Increment activity count and per-session count in Firestore
-      const targetActivity = detailsList[0].activity;
-      const activityId = targetActivity.id;
-      const activityDate = targetActivity.date; // effective session date
-      const numParticipants = detailsList.length;
-
-      try {
-        const activityRef = doc(db, 'activities', activityId);
-        const activitySnap = await getDoc(activityRef);
-
-        if (activitySnap.exists()) {
-          const actData = activitySnap.data() as Activity;
-          const currentSessionCounts = actData.sessionBookings || {};
-          const currentForDate = currentSessionCounts[activityDate] ?? (activityDate === actData.date ? actData.bookedCount : 0) ?? 0;
-          const newCountForDate = currentForDate + numParticipants;
-          
-          await updateDoc(activityRef, {
-            bookedCount: increment(numParticipants),
-            [`sessionBookings.${activityDate}`]: newCountForDate
+              `
+            }
           });
-        } else {
-          const baseActivity = activities.find(a => a.id === activityId) || targetActivity;
-          const initialCount = (baseActivity.bookedCount || 0) + numParticipants;
-          await setDoc(activityRef, {
-            title: baseActivity.title,
-            description: baseActivity.description,
-            date: baseActivity.date,
-            time: baseActivity.time,
-            location: baseActivity.location || 'The Hub',
-            capacity: baseActivity.capacity || 20,
-            bookedCount: initialCount,
-            category: baseActivity.category || 'community',
-            status: baseActivity.status || 'upcoming',
-            frequency: baseActivity.frequency || 'once',
-            sessionBookings: {
-              ...(baseActivity.sessionBookings || {}),
-              [activityDate]: initialCount
-            },
-            ...(baseActivity.imageUrl ? { imageUrl: baseActivity.imageUrl } : {}),
-            ...(baseActivity.flickrAlbumUrl ? { flickrAlbumUrl: baseActivity.flickrAlbumUrl } : {}),
-            ...(baseActivity.ageRange ? { ageRange: baseActivity.ageRange } : {}),
-            ...(baseActivity.includesFood !== undefined ? { includesFood: baseActivity.includesFood } : {}),
-            ...(baseActivity.foodOptions ? { foodOptions: baseActivity.foodOptions } : {})
-          });
+        } catch (mailErr) {
+          console.error("Error sending booking email:", mailErr);
         }
-      } catch (actErr) {
-        console.warn("Could not update activity document in Firestore:", actErr);
       }
 
-      // 4. Update local activities state immediately so UI numbers reduce instantly
+      // Update local activities state immediately so UI numbers reduce instantly
       setActivities(prev => prev.map(a => {
         if (a.id !== activityId) return a;
         const prevSessionBookings = a.sessionBookings || {};
@@ -1505,7 +1614,7 @@ const App: React.FC = () => {
         };
       }));
 
-      // 5. Update local registrations optimistically
+      // Update local registrations optimistically
       const newBookings: Booking[] = detailsList.map((detail, idx) => ({
         id: createdBookingIds[idx] || `bk-${Date.now()}-${idx}`,
         bookerName: user.name,
@@ -1588,6 +1697,86 @@ const App: React.FC = () => {
           console.error("Firestore Error logged:", err);
         }
       }
+    }
+  };
+
+  // Only possible when the chosen session date is full; admins offer places from the waitlist.
+  const handleJoinWaitlist = async (details: BookingDetail[]) => {
+    if (!user || details.length === 0) return;
+    const activity = details[0].activity;
+    const sessionDate = activity.date;
+
+    if (hasSessionEnded(sessionDate, activity.time)) {
+      alert(`"${activity.title}" on ${sessionDate} has already finished.`);
+      return;
+    }
+
+    try {
+      const actSnap = await getDoc(doc(db, 'activities', activity.id));
+      const live = actSnap.exists() ? (actSnap.data() as Activity) : activity;
+      const booked = getStoredCountForDate(live, sessionDate);
+      if (booked < (live.capacity ?? activity.capacity)) {
+        alert(`Good news: "${activity.title}" on ${sessionDate} has spaces available, so you can book directly instead of joining the waitlist.`);
+        return;
+      }
+
+      const alreadyWaiting = new Set(waitlist
+        .filter(w => w.userId === user.id && w.sessionId === activity.id && w.sessionDate === sessionDate && w.status === 'waiting')
+        .map(w => w.participantName.toLowerCase().trim()));
+      const toAdd = details.filter(d => !alreadyWaiting.has(d.participantName.toLowerCase().trim()));
+      if (toAdd.length === 0) {
+        alert("Everyone selected is already on the waitlist for this session.");
+        return;
+      }
+
+      for (const d of toAdd) {
+        await addDoc(collection(db, 'waitlist'), {
+          sessionId: activity.id,
+          sessionTitle: activity.title,
+          sessionDate,
+          sessionTime: activity.time,
+          participantName: d.participantName,
+          userId: user.id,
+          bookerName: user.name,
+          bookerEmail: user.email || '',
+          bookerMobile: d.bookerMobile,
+          foodChoice: d.foodChoice || '',
+          foodConflictConfirmed: d.foodConflictConfirmed || false,
+          joinedAt: serverTimestamp(),
+          status: 'waiting',
+        });
+      }
+
+      const names = toAdd.map(d => d.participantName).join(', ');
+      if (user.email) {
+        try {
+          await addDoc(collection(db, 'mail'), {
+            to: [user.email],
+            replyTo: 'jstreet@freeatlast.co.uk',
+            message: {
+              subject: `You're on the waitlist: ${activity.title}`,
+              text: `Hi ${user.name},\n\n${activity.title} on ${sessionDate} (${activity.time}) is currently full, so we've added ${names} to the waitlist.\n\nIf a place becomes available we'll be in touch. Being on the waitlist doesn't guarantee a place, so please don't attend unless we confirm a booking.\n\nfree@last`,
+            }
+          });
+        } catch (mailErr) {
+          console.error("Error sending waitlist email:", mailErr);
+        }
+      }
+      setNotification(`${names} added to the waitlist. We'll contact you if a place becomes available.`);
+      setTimeout(() => setNotification(null), 4000);
+    } catch (error: any) {
+      console.error("Join waitlist error:", error);
+      setNotification(`Could not join the waitlist: ${error.message || 'Please try again'}`);
+    }
+  };
+
+  const handleLeaveWaitlist = async (entryId: string) => {
+    try {
+      await deleteDoc(doc(db, 'waitlist', entryId));
+      setWaitlist(prev => prev.filter(w => w.id !== entryId));
+    } catch (error: any) {
+      console.error("Leave waitlist error:", error);
+      setNotification(`Could not leave the waitlist: ${error.message || 'Please try again'}`);
     }
   };
 
@@ -1880,6 +2069,9 @@ const App: React.FC = () => {
           hasConfirmedPhotoPolicy={hasConfirmedPhotoPolicy}
           activities={activities}
           setActiveTab={setActiveTab}
+          waitlist={user?.role === 'admin' ? waitlist.filter(w => w.userId === user.id) : waitlist}
+          onJoinWaitlist={handleJoinWaitlist}
+          onLeaveWaitlist={handleLeaveWaitlist}
         />;
       case 'gallery':
         if (user?.role === 'member' && user?.status !== 'approved') {
@@ -1919,6 +2111,7 @@ const App: React.FC = () => {
             inquiries={inquiries}
             bookings={sessionRegistrations}
             onDeleteBooking={handleDeleteBooking}
+            waitlist={waitlist}
             users={allUsers}
             teamLogs={teamLogs}
             wellbeingLogs={wellbeingLogs}
