@@ -329,6 +329,27 @@ export interface Booking {
   foodChoice?: string;
   foodConflictConfirmed?: boolean;
   foodConflictWarningRaised?: boolean;
+  cancelledReason?: 'over_capacity';
+}
+
+// A place in the queue for a session date that was full when the person tried to book.
+export interface WaitlistEntry {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  sessionDate: string;
+  sessionTime: string;
+  participantName: string;
+  userId: string;
+  bookerName: string;
+  bookerEmail: string;
+  bookerMobile: string;
+  foodChoice?: string;
+  foodConflictConfirmed?: boolean;
+  joinedAt: any;
+  status: 'waiting' | 'promoted';
+  // Set when the person was moved here because their booking was made after the session was already full.
+  fromOverCapacity?: boolean;
 }
 
 export interface GalleryAlbum {

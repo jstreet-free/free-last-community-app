@@ -8,19 +8,36 @@ service cloud.firestore {
 
     // --- Helpers ---
     function isSignedIn() { return request.auth != null; }
+    // Only counts once the person has proved they own the inbox, so nobody can claim a
+    // staff address just by signing up with it.
     function hasEmail(emailStr) {
       return isSignedIn() && 
         request.auth.token != null && 
         'email' in request.auth.token && 
         request.auth.token.email != null && 
+        request.auth.token.get('email_verified', false) == true &&
         request.auth.token.email.lower() == emailStr;
     }
 
-    function isAdmin() { 
+    // Who a non-admin is allowed to email: free@last's own inboxes, or themselves.
+    function isStaffOnlyRecipients(to) {
+      return to is list && to.size() >= 1 && to.size() <= 3 &&
+        to.toSet().difference(['jstreet@freeatlast.co.uk', 'info@freeatlast.co.uk', 'jstreet@freeatlast.st'].toSet()).size() == 0;
+    }
+    function isOwnInboxOnly(to) {
+      return isSignedIn() && to is list && to.size() == 1 && to[0] is string &&
+        'email' in request.auth.token && request.auth.token.email != null &&
+        to[0].lower() == request.auth.token.email.lower();
+    }
+
+    // Team accounts only get admin access once an admin has approved them; a fresh
+    // Team signup is 'pending' and must not see other people's data.
+    function isAdmin() {
       return isSignedIn() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'team')) ||
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'team' &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved'))) ||
         hasEmail('jstreet@freeatlast.st') ||
         hasEmail('jstreet@freeatlast.co.uk') ||
         hasEmail('info@freeatlast.co.uk')
@@ -77,7 +94,16 @@ service cloud.firestore {
         && data.bookerName is string
         && data.participantName is string
         && data.sessionId is string
-        && data.userId == request.auth.uid;
+        // Admins can book on someone's behalf (e.g. giving a waitlisted person a place).
+        && (data.userId == request.auth.uid || isAdmin());
+    }
+
+    function isValidWaitlistEntry(data) {
+      return data.keys().hasAll(['sessionId', 'sessionTitle', 'sessionDate', 'participantName', 'userId', 'bookerName', 'joinedAt', 'status'])
+        && data.sessionId is string
+        && data.participantName is string
+        && data.status == 'waiting'
+        && (data.userId == request.auth.uid || isAdmin());
     }
 
     function isValidTeamLog(data) {
@@ -186,11 +212,11 @@ service cloud.firestore {
 
     match /activities/{activityId} {
       allow read: if true;
-      allow create: if (isAdmin() || isSignedIn()) && isValidActivity(incoming());
+      allow create: if isAdmin() && isValidActivity(incoming());
+      // Non-admins may only change booking counts (when booking or cancelling), never the activity itself.
       allow update: if (isAdmin() && isValidActivity(incoming())) ||
-                       (isSignedIn() && 
-                        (incoming().diff(existing()).affectedKeys().hasOnly(['bookedCount', 'sessionBookings']) ||
-                         isValidActivity(incoming())));
+                       (isSignedIn() &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['bookedCount', 'sessionBookings']));
       allow delete: if isAdmin();
     }
 
@@ -217,8 +243,19 @@ service cloud.firestore {
     }
 
     match /mail/{mailId} {
-      allow create: if true; 
+      // Admins can email anyone; everyone else only staff or themselves, with no cc/bcc tricks.
+      allow create: if isAdmin() || (
+                     !incoming().keys().hasAny(['cc', 'bcc', 'from', 'toUids', 'ccUids', 'bccUids', 'template']) &&
+                     (isStaffOnlyRecipients(incoming().to) || isOwnInboxOnly(incoming().to))
+                   );
       allow read, update, delete: if isAdmin();
+    }
+
+    match /waitlist/{entryId} {
+      allow create: if isSignedIn() && isValidWaitlistEntry(incoming());
+      allow read: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
     }
 
     match /bookings/{bookingId} {
@@ -241,8 +278,11 @@ service cloud.firestore {
       allow update: if (isOwner(userId) && (
                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'department', 'profileComplete', 'profile', 'status', 'photoPolicyAgreed', 'photoPolicyAgreedAt', 'householdId', 'householdRole', 'primaryMemberId', 'primaryMemberName'])
                      && (
-                       // Team/Members can update status but team can't approve themselves
-                       (incoming().status == 'pending' || (existing().role == 'member' && incoming().status == 'approved'))
+                       // Nobody can approve themselves: status may stay as it is or go back to pending.
+                       // Friends don't need approval, so they may mark themselves approved.
+                       incoming().status == existing().get('status', '')
+                       || incoming().status == 'pending'
+                       || (existing().role == 'friend' && incoming().status == 'approved')
                        || isOwnerEmail()
                      )
                      || (isOwnerEmail() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'profileComplete']))

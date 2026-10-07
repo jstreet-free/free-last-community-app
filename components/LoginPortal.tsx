@@ -33,7 +33,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       const saved = sessionStorage.getItem(DRAFT_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.role) return parsed.role;
+        if (parsed.role && parsed.role !== 'admin') return parsed.role;
       }
     } catch {}
     return 'member';
@@ -171,17 +171,12 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         return;
       }
 
+      // This code only filters out accidental Team signups. It is visible in the site's code, so it
+      // is not what protects data: Team accounts get no access until an admin approves them.
       if (role === 'team' && teamPasscode.trim() !== 'HUB2024') {
         newFieldErrors.passcode = true;
         setFieldErrors(newFieldErrors);
         setErrorMessage('Invalid team access code. Please check with your team coordinator.');
-        return;
-      }
-
-      if (role === 'admin' && teamPasscode.trim() !== 'ADMIN2024') {
-        newFieldErrors.passcode = true;
-        setFieldErrors(newFieldErrors);
-        setErrorMessage('Invalid admin access code. Please check with your administrator.');
         return;
       }
     } else {
@@ -312,7 +307,8 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                 I am joining as a:
               </label>
               <div className="flex gap-2 p-1.5 bg-slate-50 rounded-2xl flex-wrap">
-                {(['member', 'friend', 'team', 'admin'] as UserRole[]).map(r => (
+                {/* Admin access is granted by an existing admin in Management, not chosen at signup. */}
+                {(['member', 'friend', 'team'] as UserRole[]).map(r => (
                   <button
                     key={r}
                     type="button"
@@ -521,11 +517,11 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           )}
 
           {/* Access code for team / admin */}
-          {mode === 'signup' && (role === 'team' || role === 'admin') && (
+          {mode === 'signup' && role === 'team' && (
             <div className="space-y-1.5 animate-slideDown">
               <div className="flex justify-between items-center ml-2">
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                  {role === 'admin' ? 'Admin Access Code' : 'Team Access Code'}
+                  Team Access Code
                 </label>
                 {fieldErrors.passcode && (
                   <span className="text-[9px] text-red-600 font-bold uppercase">Invalid Code</span>
