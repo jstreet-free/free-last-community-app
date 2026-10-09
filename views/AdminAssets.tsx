@@ -586,7 +586,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           category: newActivity.category || 'community',
           ageRange: newActivity.ageRange || '',
           status: newActivity.status || 'upcoming',
-          frequency: newActivity.frequency || 'once'
+          frequency: newActivity.frequency || 'once',
+          // Firestore doesn't record who created a document, so keep it on the activity itself
+          createdBy: user.id,
+          createdByName: user.name || user.email || '',
+          createdAt: new Date().toISOString()
         };
         
         // Clear local draft on success
