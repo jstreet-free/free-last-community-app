@@ -25,17 +25,39 @@ const parseDateOnly = (dateStr: string): Date | null => {
   return new Date(y, m - 1, d, 0, 0, 0, 0);
 };
 
-export const getSessionEnd = (dateStr: string, timeStr?: string): Date | null => {
-  const day = parseDateOnly(dateStr);
-  if (!day) return null;
-
-  let endMinutes: number | null = null;
+// Every time of day mentioned in the text, in order, as minutes after midnight.
+const parseTimesOfDay = (timeStr?: string): number[] => {
+  const times: number[] = [];
   for (const match of (timeStr || '').matchAll(TIME_TOKEN)) {
     // Ignore bare numbers with neither minutes nor am/pm (e.g. a stray "2" in "2 hours").
     if (!match[2] && !match[3]) continue;
     const mins = parseMinutes(match[1], match[2], match[3]);
-    if (mins !== null) endMinutes = mins;
+    if (mins !== null) times.push(mins);
   }
+  return times;
+};
+
+// Start and end as local date-times, for calendar invites. A session with only a start time is
+// assumed to last an hour; null means no time could be read, so treat it as an all-day event.
+export const getSessionTimes = (dateStr: string, timeStr?: string): { start: Date; end: Date } | null => {
+  const day = parseDateOnly(dateStr);
+  const times = parseTimesOfDay(timeStr);
+  if (!day || times.length === 0) return null;
+  const start = new Date(day);
+  start.setMinutes(times[0]);
+  const end = new Date(day);
+  const endMinutes = times[times.length - 1];
+  if (times.length > 1 && endMinutes > times[0]) end.setMinutes(endMinutes);
+  else end.setMinutes(times[0] + 60);
+  return { start, end };
+};
+
+export const getSessionEnd = (dateStr: string, timeStr?: string): Date | null => {
+  const day = parseDateOnly(dateStr);
+  if (!day) return null;
+
+  const times = parseTimesOfDay(timeStr);
+  const endMinutes = times.length > 0 ? times[times.length - 1] : null;
 
   const end = new Date(day);
   if (endMinutes === null) {

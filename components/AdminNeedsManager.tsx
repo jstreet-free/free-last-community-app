@@ -175,6 +175,7 @@ export const AdminNeedsManager: React.FC = () => {
       } else {
         // 2. Trigger automated system broadcast email to supporters
         await addDoc(collection(db, 'mail'), {
+          createdAt: new Date().toISOString(),
           to: friendsEmails,
           message: {
             subject: `🚨 Urgent Center Need: ${need.category.toUpperCase()} Callout: ${need.title}`,

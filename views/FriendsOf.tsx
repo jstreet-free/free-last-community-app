@@ -133,6 +133,7 @@ export const FriendsOf: React.FC<FriendsOfProps> = ({ user, setActiveTab }) => {
 
       // 3. Trigger email via Firebase 'mail' collection to JStreet
       await addDoc(collection(db, 'mail'), {
+        createdAt: new Date().toISOString(),
         to: ['jstreet@freeatlast.co.uk'],
         replyTo: offerForm.email,
         message: {

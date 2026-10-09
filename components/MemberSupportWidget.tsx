@@ -61,6 +61,7 @@ export const MemberSupportWidget: React.FC<MemberSupportWidgetProps> = ({ user, 
       // 2. Trigger staff email notification via Firestore mail collection
       try {
         await addDoc(collection(db, 'mail'), {
+          createdAt: new Date().toISOString(),
           to: [targetEmail, 'jstreet@freeatlast.st'],
           replyTo: email || targetEmail,
           message: {

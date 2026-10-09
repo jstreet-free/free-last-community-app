@@ -334,6 +334,7 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({ user, on
           });
 
           await addDoc(collection(db, 'mail'), {
+            createdAt: new Date().toISOString(),
             to: ['jstreet@freeatlast.co.uk'],
             replyTo: user.email || 'no-reply@freeatlast.co.uk',
             message: {
