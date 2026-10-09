@@ -363,6 +363,9 @@ export interface GalleryAlbum {
   category: 'youth' | 'community' | 'sports' | 'education';
   flickrAlbumUrl: string;
   imageUrl?: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export interface CaseStudyRequest {

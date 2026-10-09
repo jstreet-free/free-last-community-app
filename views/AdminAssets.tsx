@@ -973,7 +973,11 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           description: newAlbum.description || '',
           date: newAlbum.date || new Date().toISOString().split('T')[0],
           category: newAlbum.category || 'youth',
-          imageUrl: newAlbum.imageUrl || ''
+          imageUrl: newAlbum.imageUrl || '',
+          // Firestore doesn't record who created a document, so keep it on the album itself
+          createdBy: user.id,
+          createdByName: user.name || user.email || '',
+          createdAt: new Date().toISOString()
         };
 
         await addDoc(collection(db, 'gallery_albums'), albumToSave);
