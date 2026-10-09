@@ -18,7 +18,7 @@ import { MemberProfileEditor } from './components/MemberProfileEditor';
 import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
 import { LoginPortal } from './components/LoginPortal';
 import { User, UserRole, UserStatus, MemberProfile, Announcement, Activity, Partner, ImpactStory, Inquiry, Booking, TeamLog, GalleryAlbum, MailLog, MoodLog, CaseStudyRequest, CaseStudy, SignupAttempt, WaitlistEntry } from './types';
-import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_ACTIVITIES, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
+import { Icons, COLORS, IMAGES as DEFAULT_IMAGES, SAMPLE_ANNOUNCEMENTS, SAMPLE_PARTNERS, SAMPLE_IMPACT_STORIES } from './constants';
 
 import { db, auth } from './services/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, updateDoc, serverTimestamp, getDoc, getDocs, where, increment, runTransaction } from 'firebase/firestore';
@@ -225,7 +225,7 @@ const App: React.FC = () => {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       } catch {}
     }
-    return SAMPLE_ACTIVITIES;
+    return [];
   });
   const [partners, setPartners] = useState<Partner[]>(() => {
     const saved = localStorage.getItem('cached_partners');
@@ -373,9 +373,10 @@ const App: React.FC = () => {
       snapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as Activity);
       });
-      const finalItems = items.length > 0 ? items : SAMPLE_ACTIVITIES;
-      setActivities(finalItems);
-      safeSetStorage('cached_activities', JSON.stringify(finalItems));
+      // No sample fallback: showing (and letting admins edit) placeholder activities is how they used to
+      // end up saved to Firestore as if someone had added them.
+      setActivities(items);
+      safeSetStorage('cached_activities', JSON.stringify(items));
     }, (error) => {
       if (isQuotaError(error)) {
         console.warn("Activities snapshot quota reached; using cached/sample data.");
@@ -390,36 +391,13 @@ const App: React.FC = () => {
             }
           } catch {}
         }
-        setActivities(SAMPLE_ACTIVITIES);
+        setActivities([]);
       } else {
         console.error("Activities snapshot error:", error);
       }
     });
     return () => unsubscribe();
   }, []);
-
-  // Ensure initial activities are seeded into Firestore when an authenticated user is present
-  useEffect(() => {
-    if (!user) return;
-    const seedInitialActivities = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'activities'));
-        if (snap.empty) {
-          for (const act of SAMPLE_ACTIVITIES) {
-            await setDoc(doc(db, 'activities', act.id), {
-              ...act,
-              sessionBookings: {
-                [act.date]: act.bookedCount || 0
-              }
-            }, { merge: true });
-          }
-        }
-      } catch (err) {
-        console.warn("Could not seed activities to Firestore:", err);
-      }
-    };
-    seedInitialActivities();
-  }, [user]);
 
   // Sync partners from Firestore
   useEffect(() => {

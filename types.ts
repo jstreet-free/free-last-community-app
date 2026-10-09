@@ -174,6 +174,9 @@ export interface Activity {
   includesFood?: boolean;
   foodOptions?: string;
   sessionBookings?: { [dateStr: string]: number };
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export const isActivityBookable = (activity?: { status?: string } | null): boolean => {
@@ -360,6 +363,9 @@ export interface GalleryAlbum {
   category: 'youth' | 'community' | 'sports' | 'education';
   flickrAlbumUrl: string;
   imageUrl?: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export interface CaseStudyRequest {
