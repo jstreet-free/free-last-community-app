@@ -290,6 +290,8 @@ export interface Inquiry {
 export interface MailLog {
   id: string;
   to: string | string[];
+  createdAt?: string; // ISO time the app queued the email
+  type?: 'booking-confirmation' | 'booking-cancellation' | 'booking-waitlist'; // member booking emails, kept out of the Mail Monitor
   message: {
     subject: string;
     text: string;

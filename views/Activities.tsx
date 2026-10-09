@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { SAMPLE_ACTIVITIES, Icons, COLORS } from '../constants';
 import { Activity, User, WaitlistEntry, isActivityBookable, isActivityUpcoming, getActivityDisplayStatus } from '../types';
 import { hasSessionEnded } from '../services/sessionTime';
@@ -17,7 +17,7 @@ export interface BookingDetail {
 interface ActivitiesProps {
   user: User | null;
   onBook: (bookingDetail: BookingDetail | BookingDetail[]) => void;
-  onCancel?: (bookingId: string) => void;
+  onCancel?: (bookingIds: string[]) => void;
   onDeleteBooking?: (bookingId: string) => void;
   bookings: string[];
   assets: any;
@@ -28,6 +28,9 @@ interface ActivitiesProps {
   waitlist: WaitlistEntry[];
   onJoinWaitlist: (details: BookingDetail[]) => void;
   onLeaveWaitlist: (entryId: string) => void;
+  // Set when another part of the app (e.g. the upcoming bookings banner) asks to show the person's bookings.
+  openBookingHistory?: boolean;
+  onBookingHistoryOpened?: () => void;
 }
 
 export interface AccountMember {
@@ -60,7 +63,9 @@ export const Activities: React.FC<ActivitiesProps> = ({
   setActiveTab,
   waitlist,
   onJoinWaitlist,
-  onLeaveWaitlist
+  onLeaveWaitlist,
+  openBookingHistory,
+  onBookingHistoryOpened
 }) => {
   const [filter, setFilter] = useState<'all' | 'youth' | 'community' | 'sports' | 'education'>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
@@ -69,6 +74,12 @@ export const Activities: React.FC<ActivitiesProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [bookingStatusFilter, setBookingStatusFilter] = useState<'all' | 'bookable' | 'not_bookable'>('all');
   const [viewMode, setViewMode] = useState<'explore' | 'history'>('explore');
+  useEffect(() => {
+    if (!openBookingHistory) return;
+    setViewMode('history');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    onBookingHistoryOpened?.();
+  }, [openBookingHistory]);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [viewingInfoActivity, setViewingInfoActivity] = useState<Activity | null>(null);
   const [bookerMobile, setBookerMobile] = useState<string>('');
@@ -834,7 +845,7 @@ export const Activities: React.FC<ActivitiesProps> = ({
                                 <button
                                   onClick={() => {
                                     if (confirm(`Are you sure you want to cancel your booking for ${b.sessionTitle}?`)) {
-                                      onCancel(b.id);
+                                      onCancel([b.id]);
                                     }
                                   }}
                                   className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-red-100 hover:scale-105 active:scale-95 brand-heading"
@@ -1312,12 +1323,12 @@ export const Activities: React.FC<ActivitiesProps> = ({
                                       onClick={() => {
                                         if (occurrenceUserBookings.length === 1) {
                                           if (confirm(`Are you sure you want to cancel your booking for ${activity.title}?`)) {
-                                            onCancel(occurrenceUserBookings[0].id);
+                                            onCancel([occurrenceUserBookings[0].id]);
                                           }
                                         } else {
                                           const names = occurrenceUserBookings.map(b => b.participantName).join('\n- ');
                                           if (confirm(`Cancel all ${occurrenceUserBookings.length} family bookings for this session?\n\nParticipants:\n- ${names}`)) {
-                                            occurrenceUserBookings.forEach(b => onCancel(b.id));
+                                            onCancel(occurrenceUserBookings.map(b => b.id));
                                           }
                                         }
                                       }}

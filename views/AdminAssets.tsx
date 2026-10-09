@@ -90,7 +90,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
   signupAttempts = [],
   onNotification,
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs' | 'warnings' | 'app-usage'>(() => {
+  const [activeAdminTab, setActiveAdminTab] = useState<'images' | 'updates' | 'activities' | 'partners' | 'impact' | 'inquiries' | 'bookings' | 'users' | 'rally' | 'archive' | 'mail' | 'wellbeing' | 'social-impact' | 'newsletter' | 'needs' | 'warnings' | 'app-usage' | 'new-bookings'>(() => {
     return (localStorage.getItem('admin_active_tab') as any) || 'app-usage';
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -294,6 +294,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
 
       // 1. Create a outbound reply document in mail collection so recipient receives email
       await addDoc(collection(db, 'mail'), {
+        createdAt: new Date().toISOString(),
         to: recipient,
         replyTo: user.email || 'info@freeatlast.co.uk',
         message: {
@@ -899,6 +900,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       if (recipientEmail && recipientEmail.includes('@')) {
         try {
           await addDoc(collection(db, 'mail'), {
+            createdAt: new Date().toISOString(),
             to: recipientEmail,
             message: {
               subject: `free@last Response: ${inquiry.type || 'Question'}`,
@@ -1072,6 +1074,23 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     }
     return new Date(b.sessionDate); // fallback
   };
+
+  // Bookings made in the last 30 days, one row per booking a member made: the people they booked
+  // onto one session date together share a booking time, so they're shown as one row.
+  const newBookingGroups = (() => {
+    const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const groups = new Map<string, { booker: string; sessionId: string; title: string; sessionDate: string; sessionTime: string; bookedAt: Date; names: string[] }>();
+    bookings.forEach(b => {
+      if (b.status === 'cancelled' || !b.bookingDate) return;
+      const bookedAt = getBookingDateObj(b);
+      if (bookedAt.getTime() < since) return;
+      const key = `${b.userId}|${b.sessionId}|${b.sessionDate}|${Math.floor(bookedAt.getTime() / 60000)}`;
+      const group = groups.get(key) || { booker: b.bookerName, sessionId: b.sessionId, title: b.sessionTitle, sessionDate: b.sessionDate, sessionTime: b.sessionTime, bookedAt, names: [] };
+      group.names.push(b.participantName);
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).sort((a, b) => b.bookedAt.getTime() - a.bookedAt.getTime());
+  })();
 
   const handleDownloadActivityBookingsCSV = (activityTitle: string, bookingsList: Booking[]) => {
     if (bookingsList.length === 0) {
@@ -1450,6 +1469,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
       const nextSteps = "What happens next: we've put you on the waitlist, in the order you originally booked. If a place becomes available we'll contact you straight away. Please don't attend unless we confirm a place.";
       try {
         await addDoc(collection(db, 'mail'), {
+          createdAt: new Date().toISOString(),
           to: [booker.email],
           replyTo: 'jstreet@freeatlast.co.uk',
           message: {
@@ -1590,6 +1610,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
     if (entry.bookerEmail) {
       try {
         await addDoc(collection(db, 'mail'), {
+          createdAt: new Date().toISOString(),
           to: [entry.bookerEmail],
           replyTo: 'jstreet@freeatlast.co.uk',
           message: {
@@ -1832,6 +1853,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           { id: 'rally', label: 'Impact Rally', icon: <Icons.Shield /> },
           { id: 'archive', label: 'Photo Archive', icon: <Icons.Camera /> },
           { id: 'users', label: 'User Hub', icon: <Icons.User /> },
+          { id: 'new-bookings', label: 'New Bookings 🆕', icon: <Icons.Calendar /> },
           { id: 'mail', label: 'Mail Monitor', icon: <Icons.Megaphone /> },
           { id: 'warnings', label: 'Warnings & Alerts ⚠️', icon: <Icons.AlertTriangle /> },
           { id: 'images', label: 'Brand Images', icon: <Icons.Camera /> }
@@ -2363,6 +2385,9 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                 // Apply timeframe, weekly session date, and search filters
                 const now = new Date();
                 const filteredBookingsForActivity = allBookingsForActivity.filter(b => {
+                  // Cancelled places are no longer on the register
+                  if (b.status === 'cancelled') return false;
+
                   // Weekly Session Date filter
                   if (selectedSessionDateFilter !== 'all') {
                     if (b.sessionDate !== selectedSessionDateFilter) return false;
@@ -2907,7 +2932,7 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                             : 'Recent';
 
                           return (
-                            <tr key={booking.id} className={`hover:bg-slate-50/50 transition-colors group ${isDup ? 'bg-amber-50/40' : ''}`}>
+                            <tr key={booking.id} className={`hover:bg-slate-50/50 transition-colors group ${isDup ? 'bg-amber-50/40' : ''} ${booking.status === 'cancelled' ? 'bg-red-50/40 opacity-70' : ''}`}>
                               <td className="px-8 py-6">
                                 <div className="flex items-center gap-2">
                                   <p className="text-brand-dark-blue font-bold brand-heading text-sm">{booking.sessionTitle}</p>
@@ -2928,7 +2953,12 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
                               </td>
                               <td className="px-8 py-6">
                                 <div className="flex items-center gap-2">
-                                  <p className="text-brand-dark-blue font-bold text-sm tracking-tight">{booking.participantName}</p>
+                                  <p className={`text-brand-dark-blue font-bold text-sm tracking-tight ${booking.status === 'cancelled' ? 'line-through' : ''}`}>{booking.participantName}</p>
+                                  {booking.status === 'cancelled' && (
+                                    <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-600 text-white shrink-0">
+                                      Cancelled
+                                    </span>
+                                  )}
                                   {isDup && (
                                     <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 border border-amber-300">
                                       Duplicate
@@ -5631,6 +5661,53 @@ export const AdminAssets: React.FC<AdminAssetsProps> = ({
           </div>
         </div>
       )}
+      {activeAdminTab === 'new-bookings' && (
+        <div className="animate-fadeIn">
+          <div className="mb-10">
+            <h2 style={{ color: COLORS.secondary }} className="text-3xl font-bold brand-heading uppercase tracking-tight">New Bookings</h2>
+            <p className="text-gray-500 font-light mt-1">Bookings members have made in the last 30 days, newest first. Cancelled places are not shown.</p>
+          </div>
+
+          {newBookingGroups.length === 0 ? (
+            <div className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-12 text-center">
+              <p className="text-slate-500 font-light text-sm">No new bookings in the last 30 days.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {newBookingGroups.map(group => (
+                <div key={`${group.sessionId}-${group.sessionDate}-${group.bookedAt.getTime()}-${group.booker}`} className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-slate-800 text-sm">
+                      <strong>{group.booker}</strong> booked <strong>{group.title}</strong> for{' '}
+                      <strong>{parseLocalDate(group.sessionDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong>
+                      {group.sessionTime ? `, ${group.sessionTime}` : ''}
+                    </p>
+                    <p className="text-slate-500 text-xs mt-1">
+                      {group.names.length} {group.names.length === 1 ? 'person' : 'people'}: {group.names.join(', ')}
+                    </p>
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mt-2">
+                      Booked {group.bookedAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setActiveAdminTab('bookings');
+                      setActiveBookingView('by-activity');
+                      setSelectedActivityId(group.sessionId);
+                      setSelectedSessionDateFilter(group.sessionDate);
+                    }}
+                    className="px-5 py-3 bg-brand-dark-blue hover:bg-slate-800 text-white rounded-xl font-bold text-[10px] brand-heading uppercase tracking-widest transition-all shadow-md active:scale-95 shrink-0"
+                    title="Open the register for this session date"
+                  >
+                    More details →
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {activeAdminTab === 'mail' && (
         <div className="animate-fadeIn">
           {/* Top Header & Metrics */}

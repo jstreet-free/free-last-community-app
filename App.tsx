@@ -13,6 +13,7 @@ import { TeamRegistration } from './views/TeamRegistration';
 import { FriendsOf } from './views/FriendsOf';
 import { Videos } from './views/Videos';
 import { PhotoPolicyModal } from './components/PhotoPolicyModal';
+import { UpcomingBookingsBanner } from './components/UpcomingBookingsBanner';
 import { MemberSupportWidget } from './components/MemberSupportWidget';
 import { MemberProfileEditor } from './components/MemberProfileEditor';
 import { PendingMemberHomeVisitNotice } from './components/PendingMemberHomeVisitNotice';
@@ -37,6 +38,7 @@ import {
 import { handleFirestoreError, OperationType, isQuotaError } from './services/firestoreUtils';
 import { hasSessionEnded } from './services/sessionTime';
 import { countActiveBookingsForDate, getStoredCountForDate } from './services/bookingCounts';
+import { buildBookingCancellationMessage, buildBookingConfirmationMessage } from './services/bookingConfirmationEmail';
 import { recordAppVisit } from './services/analyticsService';
 import { logSignupAttempt } from './services/adminAuthService';
 
@@ -258,6 +260,7 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
+  const [openBookingHistory, setOpenBookingHistory] = useState(false);
   const [userRegistrations, setUserRegistrations] = useState<Booking[]>(() => {
     const saved = localStorage.getItem('cached_user_registrations');
     return saved ? JSON.parse(saved) : [];
@@ -910,13 +913,16 @@ const App: React.FC = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: MailLog[] = [];
       snapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() } as MailLog);
+        const log = { id: doc.id, ...doc.data() } as MailLog;
+        // Members' own booking emails are left out; admins see new bookings in the New Bookings tab.
+        if (!log.type) items.push(log);
       });
-      items.sort((a, b) => {
-        const timeA = a.delivery?.endTime?.seconds ? a.delivery.endTime.seconds * 1000 : 0;
-        const timeB = b.delivery?.endTime?.seconds ? b.delivery.endTime.seconds * 1000 : 0;
-        return timeB - timeA;
-      });
+      // Newest first. Emails not yet sent have no delivery times, so use when they were created;
+      // older emails written before createdAt existed fall back to their delivery times.
+      const mailTime = (m: MailLog) =>
+        (m.createdAt ? Date.parse(m.createdAt) : 0) ||
+        (m.delivery?.endTime?.seconds || m.delivery?.startTime?.seconds || 0) * 1000;
+      items.sort((a, b) => mailTime(b) - mailTime(a));
       setMailLogs(items);
       safeSetStorage('cached_mail_logs', JSON.stringify(items));
     }, (error) => {
@@ -1407,6 +1413,7 @@ const App: React.FC = () => {
 
     const path = 'bookings';
     const createdBookingIds: string[] = [];
+    let committedCounts = { forDate: 0, total: 0 };
     try {
       // Re-check capacity and create the bookings in a single transaction, so two people
       // booking at the same moment can't both take the last remaining places.
@@ -1450,6 +1457,7 @@ const App: React.FC = () => {
             createdBookingIds.push(bookingRef.id);
           }
 
+          committedCounts = { forDate: bookedForDate + numParticipants, total: (baseActivity.bookedCount || 0) + numParticipants };
           if (activitySnap.exists()) {
             tx.update(activityRef, {
               bookedCount: increment(numParticipants),
@@ -1488,106 +1496,17 @@ const App: React.FC = () => {
         throw txErr;
       }
 
-      for (const detail of detailsList) {
-        // Raise a warning note with admin if they confirmed against their medical/dietary info
-        if (detail.foodConflictConfirmed) {
-          try {
-            await addDoc(collection(db, 'warnings'), {
-              type: 'dietary_conflict_confirmed',
-              title: 'Dietary Conflict Confirmed',
-              message: `${detail.participantName} booked ${detail.activity.title} and chose "${detail.foodChoice || 'Unknown'}" which conflicts with their registered dietary/allergies information.`,
-              personName: detail.participantName,
-              userEmail: user.email || '',
-              details: {
-                sessionTitle: detail.activity.title,
-                sessionDate: detail.activity.date,
-                sessionTime: detail.activity.time,
-                sessionId: detail.activity.id,
-                foodChoice: detail.foodChoice || '',
-                bookerName: user.name,
-                bookerMobile: detail.bookerMobile,
-              },
-              timestamp: new Date().toISOString()
-            });
-
-            // Send warning email to admin as well
-            await addDoc(collection(db, 'mail'), {
-              to: ['jstreet@freeatlast.co.uk'],
-              replyTo: user.email,
-              message: {
-                subject: `⚠️ DIETARY WARNING: Booking Conflict for ${detail.participantName}`,
-                text: `Warning: A booking was completed with a confirmed dietary conflict!\nParticipant: ${detail.participantName}\nActivity: ${detail.activity.title}\nFood Chosen: ${detail.foodChoice}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
-                html: `
-                  <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #ea580c; padding: 20px; border-radius: 15px;">
-                    <h2 style="color: #ea580c; margin-top: 0;">⚠️ Dietary Booking Conflict Confirmed</h2>
-                    <p>A participant was registered with a food option that conflicts with their medical or dietary information on file, and the booker explicitly bypassed the alert.</p>
-                    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-                    <div style="background: #fffbeb; padding: 15px; border-radius: 10px; border: 1px solid #fef3c7;">
-                      <p style="margin: 5px 0;"><strong>Participant:</strong> ${detail.participantName}</p>
-                      <p style="margin: 5px 0;"><strong>Activity:</strong> ${detail.activity.title}</p>
-                      <p style="margin: 5px 0;"><strong>Chosen Food Option:</strong> <span style="color: #ea580c; font-weight: bold;">${detail.foodChoice || 'None'}</span></p>
-                      <p style="margin: 5px 0;"><strong>Booker Name:</strong> ${user.name}</p>
-                      <p style="margin: 5px 0;"><strong>Contact Mobile:</strong> ${detail.bookerMobile}</p>
-                      <p style="margin: 5px 0;"><strong>Contact Email:</strong> ${user.email}</p>
-                      <p style="margin: 5px 0;"><strong>Date & Time:</strong> ${detail.activity.date} @ ${detail.activity.time}</p>
-                    </div>
-                    <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                      free@last Hub Automated Dietary Alert
-                    </p>
-                  </div>
-                `
-              }
-            });
-          } catch (err) {
-            console.error("Error raising admin warning for dietary conflict:", err);
-          }
-        }
-
-        // Trigger email for the booking. The booking is already saved, so a mail failure isn't fatal.
-        try {
-          await addDoc(collection(db, 'mail'), {
-            to: ['jstreet@freeatlast.co.uk'],
-            replyTo: user.email,
-            message: {
-              subject: `New Booking: ${detail.activity.title}`,
-              text: `Booking for ${detail.activity.title}\nParticipant: ${detail.participantName}\nDate: ${detail.activity.date}\nTime: ${detail.activity.time}\nBooked by: ${user.name}\nMobile: ${detail.bookerMobile}\nEmail: ${user.email}`,
-              html: `
-                <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
-                  <h2 style="color: #2b337e;">New Activity Booking</h2>
-                  <p>A new registration has been received for <strong>${detail.activity.title}</strong>.</p>
-                  <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-                  <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
-                    <p style="margin: 5px 0;"><strong>Session:</strong> ${detail.activity.title}</p>
-                    <p style="margin: 5px 0;"><strong>Session Date:</strong> ${detail.activity.date}</p>
-                    <p style="margin: 5px 0;"><strong>Session Time:</strong> ${detail.activity.time}</p>
-                    <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${detail.participantName}</p>
-                    <p style="margin: 5px 0;"><strong>Booked By:</strong> ${user.name}</p>
-                    <p style="margin: 5px 0;"><strong>Mobile:</strong> ${detail.bookerMobile}</p>
-                    <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
-                  </div>
-                  <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                    System generated booking alert
-                  </p>
-                </div>
-              `
-            }
-          });
-        } catch (mailErr) {
-          console.error("Error sending booking email:", mailErr);
-        }
-      }
-
       // Update local activities state immediately so UI numbers reduce instantly
+      // Uses the counts just saved rather than adding to the local ones, because the live listener
+      // may already have delivered the new counts and adding again would count this booking twice.
       setActivities(prev => prev.map(a => {
         if (a.id !== activityId) return a;
-        const prevSessionBookings = a.sessionBookings || {};
-        const currentForDate = prevSessionBookings[activityDate] ?? (activityDate === a.date ? a.bookedCount : 0) ?? 0;
         return {
           ...a,
-          bookedCount: (a.bookedCount || 0) + numParticipants,
+          bookedCount: committedCounts.total,
           sessionBookings: {
-            ...prevSessionBookings,
-            [activityDate]: currentForDate + numParticipants
+            ...(a.sessionBookings || {}),
+            [activityDate]: committedCounts.forDate
           }
         };
       }));
@@ -1611,15 +1530,17 @@ const App: React.FC = () => {
         foodConflictWarningRaised: detail.foodConflictConfirmed || false,
       }));
 
+      // The live listener may already have added these bookings, so only add ones not already listed.
+      const addNew = (prev: Booking[]) => [...newBookings.filter(nb => !prev.some(p => p.id === nb.id)), ...prev];
       setUserRegistrations(prev => {
-        const updated = [...newBookings, ...prev];
+        const updated = addNew(prev);
         safeSetStorage('cached_user_registrations', JSON.stringify(updated));
         return updated;
       });
       setBookings(prev => Array.from(new Set([...prev, activityId])));
       if (user.role === 'admin') {
         setSessionRegistrations(prev => {
-          const updated = [...newBookings, ...prev];
+          const updated = addNew(prev);
           safeSetStorage('cached_session_registrations', JSON.stringify(updated));
           return updated;
         });
@@ -1628,6 +1549,56 @@ const App: React.FC = () => {
       const namesJoined = detailsList.map(d => d.participantName).join(', ');
       setNotification(`Registration successful for ${namesJoined}!`);
       setTimeout(() => setNotification(null), 3500);
+
+      for (const detail of detailsList) {
+        // Raise a warning note with admin if they confirmed against their medical/dietary info
+        if (detail.foodConflictConfirmed) {
+          try {
+            await addDoc(collection(db, 'warnings'), {
+              type: 'dietary_conflict_confirmed',
+              title: 'Dietary Conflict Confirmed',
+              message: `${detail.participantName} booked ${detail.activity.title} and chose "${detail.foodChoice || 'Unknown'}" which conflicts with their registered dietary/allergies information.`,
+              personName: detail.participantName,
+              userEmail: user.email || '',
+              details: {
+                sessionTitle: detail.activity.title,
+                sessionDate: detail.activity.date,
+                sessionTime: detail.activity.time,
+                sessionId: detail.activity.id,
+                foodChoice: detail.foodChoice || '',
+                bookerName: user.name,
+                bookerMobile: detail.bookerMobile,
+              },
+              timestamp: new Date().toISOString()
+            });
+          } catch (err) {
+            console.error("Error raising admin warning for dietary conflict:", err);
+          }
+        }
+      }
+
+      // Confirm the booking to the member, with calendar links so their own calendar reminds them.
+      if (user.email) {
+        try {
+          await addDoc(collection(db, 'mail'), {
+            createdAt: new Date().toISOString(),
+            to: [user.email],
+            type: 'booking-confirmation',
+            message: buildBookingConfirmationMessage({
+              bookingId: createdBookingIds[0] || `${activityId}-${activityDate}`,
+              bookerName: user.name,
+              participantNames: detailsList.map(d => d.participantName),
+              title: targetActivity.title,
+              date: activityDate,
+              time: targetActivity.time,
+              location: targetActivity.location
+            })
+          });
+        } catch (mailErr) {
+          console.error("Error sending booking confirmation email:", mailErr);
+        }
+      }
+
     } catch (error: any) {
       if (isQuotaError(error)) {
         console.warn("Firestore quota reached during booking. Saving registration in local state.");
@@ -1729,8 +1700,9 @@ const App: React.FC = () => {
       if (user.email) {
         try {
           await addDoc(collection(db, 'mail'), {
+            createdAt: new Date().toISOString(),
             to: [user.email],
-            replyTo: 'jstreet@freeatlast.co.uk',
+            type: 'booking-waitlist',
             message: {
               subject: `You're on the waitlist: ${activity.title}`,
               text: `Hi ${user.name},\n\n${activity.title} on ${sessionDate} (${activity.time}) is currently full, so we've added ${names} to the waitlist.\n\nIf a place becomes available we'll be in touch. Being on the waitlist doesn't guarantee a place, so please don't attend unless we confirm a booking.\n\nfree@last`,
@@ -1764,8 +1736,10 @@ const App: React.FC = () => {
       const bookingRef = doc(db, 'bookings', bookingId);
       const bookingSnap = await getDoc(bookingRef);
       let participantName = 'Participant';
+      let deletedBooking: Booking | null = null;
       if (bookingSnap.exists()) {
         const bookingData = bookingSnap.data() as Booking;
+        deletedBooking = bookingData;
         participantName = bookingData.participantName || 'Participant';
         
         // If not already cancelled, decrement bookedCount and sessionBookings
@@ -1822,6 +1796,41 @@ const App: React.FC = () => {
       });
       setBookings(prev => prev.filter(id => id !== bookingId));
 
+      // When the office removes someone's booking, let them know. Not for bookings already cancelled
+      // (they were emailed then), their own bookings, or duplicates where another booking for the
+      // same person on that date remains.
+      if (deletedBooking && deletedBooking.status !== 'cancelled' && deletedBooking.userId && deletedBooking.userId !== user.id) {
+        const removed = deletedBooking;
+        const sameName = (name?: string) => (name || '').toLowerCase().trim() === (removed.participantName || '').toLowerCase().trim();
+        const stillBooked = sessionRegistrations.some(b =>
+          b.id !== bookingId && b.status !== 'cancelled' && b.userId === removed.userId &&
+          b.sessionId === removed.sessionId && b.sessionDate === removed.sessionDate && sameName(b.participantName)
+        );
+        if (!stillBooked) {
+          try {
+            const memberEmail = (await getDoc(doc(db, 'users', removed.userId))).get('email');
+            if (memberEmail) {
+              await addDoc(collection(db, 'mail'), {
+                createdAt: new Date().toISOString(),
+                to: [memberEmail],
+                replyTo: 'jstreet@freeatlast.co.uk',
+                type: 'booking-cancellation',
+                message: buildBookingCancellationMessage({
+                  bookerName: removed.bookerName || 'there',
+                  participantNames: [removed.participantName],
+                  title: removed.sessionTitle,
+                  date: removed.sessionDate,
+                  time: removed.sessionTime,
+                  byOffice: true
+                })
+              });
+            }
+          } catch (mailErr) {
+            console.warn("Could not email member about deleted booking:", mailErr);
+          }
+        }
+      }
+
       setNotification(`Booking record for ${participantName} deleted successfully.`);
       setTimeout(() => setNotification(null), 3000);
     } catch (error: any) {
@@ -1855,8 +1864,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCancelBooking = async (bookingId: string) => {
-    if (!user) return;
+  // Cancels one booking and returns it, or null if it couldn't be cancelled in Firestore.
+  const cancelBooking = async (bookingId: string): Promise<Booking | null> => {
+    if (!user) return null;
     try {
       const bookingRef = doc(db, 'bookings', bookingId);
       const bookingSnap = await getDoc(bookingRef);
@@ -1922,40 +1932,7 @@ const App: React.FC = () => {
         });
       }
 
-      // 3. Trigger cancellation email alert
-      try {
-        await addDoc(collection(db, 'mail'), {
-          to: ['jstreet@freeatlast.co.uk'],
-          replyTo: user.email || 'no-reply@freeatlast.co.uk',
-          message: {
-            subject: `Cancelled Booking: ${bookingData.sessionTitle}`,
-            text: `Booking Cancelled for ${bookingData.sessionTitle}\nParticipant: ${bookingData.participantName}\nDate: ${bookingData.sessionDate}\nTime: ${bookingData.sessionTime}\nCancelled by: ${user.name}\nEmail: ${user.email}`,
-            html: `
-              <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #7e2b33; padding: 20px; border-radius: 15px;">
-                <h2 style="color: #7e2b33;">Booking Cancelled</h2>
-                <p>A registration has been cancelled for <strong>${bookingData.sessionTitle}</strong>.</p>
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-                <div style="background: #f9f9f9; padding: 15px; border-radius: 10px;">
-                  <p style="margin: 5px 0;"><strong>Session:</strong> ${bookingData.sessionTitle}</p>
-                  <p style="margin: 5px 0;"><strong>Session Date:</strong> ${bookingData.sessionDate}</p>
-                  <p style="margin: 5px 0;"><strong>Session Time:</strong> ${bookingData.sessionTime}</p>
-                  <p style="margin: 20px 0 5px 0; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Participant:</strong> ${bookingData.participantName}</p>
-                  <p style="margin: 5px 0;"><strong>Cancelled By:</strong> ${user.name}</p>
-                  <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
-                </div>
-                <p style="font-size: 11px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
-                  System generated cancellation alert
-                </p>
-              </div>
-            `
-          }
-        });
-      } catch (mailErr) {
-        console.warn("Could not trigger email on cancel:", mailErr);
-      }
-
-      setNotification(`Successfully cancelled booking for ${bookingData.participantName}`);
-      setTimeout(() => setNotification(null), 3000);
+      return bookingData;
     } catch (error: any) {
       if (isQuotaError(error)) {
         console.warn("Firestore quota reached during cancellation. Cancelling locally.");
@@ -1973,7 +1950,7 @@ const App: React.FC = () => {
         setBookings(prev => prev.filter(id => id !== bookingId));
         setNotification("Booking cancelled locally (daily cloud quota reached).");
         setTimeout(() => setNotification(null), 3000);
-        return;
+        return null;
       }
       console.error("Cancellation error:", error);
       setNotification(`Failed to cancel booking: ${error.message || 'Permission denied'}`);
@@ -1985,6 +1962,48 @@ const App: React.FC = () => {
         }
       }
     }
+    return null;
+  };
+
+  // Cancels the bookings one at a time (each updates the session's counts), then sends the member
+  // one email per session listing everyone cancelled, rather than an email per person.
+  const handleCancelBookings = async (bookingIds: string[]) => {
+    if (!user) return;
+    const cancelled: Booking[] = [];
+    for (const id of bookingIds) {
+      const booking = await cancelBooking(id);
+      if (booking) cancelled.push(booking);
+    }
+    if (cancelled.length === 0) return;
+
+    if (user.email) {
+      const sessions = new Map<string, Booking[]>();
+      cancelled.forEach(b => {
+        const key = `${b.sessionId}|${b.sessionDate}`;
+        sessions.set(key, [...(sessions.get(key) || []), b]);
+      });
+      for (const group of sessions.values()) {
+        try {
+          await addDoc(collection(db, 'mail'), {
+            createdAt: new Date().toISOString(),
+            to: [user.email],
+            type: 'booking-cancellation',
+            message: buildBookingCancellationMessage({
+              bookerName: user.name,
+              participantNames: group.map(b => b.participantName),
+              title: group[0].sessionTitle,
+              date: group[0].sessionDate,
+              time: group[0].sessionTime
+            })
+          });
+        } catch (mailErr) {
+          console.warn("Could not trigger email on cancel:", mailErr);
+        }
+      }
+    }
+
+    setNotification(`Successfully cancelled booking for ${cancelled.map(b => b.participantName).join(', ')}`);
+    setTimeout(() => setNotification(null), 3000);
   };
 
   const renderContent = () => {
@@ -2039,7 +2058,7 @@ const App: React.FC = () => {
         return <Activities 
           user={user} 
           onBook={handleBookActivity} 
-          onCancel={handleCancelBooking}
+          onCancel={handleCancelBookings}
           onDeleteBooking={handleDeleteBooking}
           bookings={bookings} 
           allBookings={user?.role === 'admin' ? sessionRegistrations : userRegistrations}
@@ -2050,6 +2069,8 @@ const App: React.FC = () => {
           waitlist={user?.role === 'admin' ? waitlist.filter(w => w.userId === user.id) : waitlist}
           onJoinWaitlist={handleJoinWaitlist}
           onLeaveWaitlist={handleLeaveWaitlist}
+          openBookingHistory={openBookingHistory}
+          onBookingHistoryOpened={() => setOpenBookingHistory(false)}
         />;
       case 'gallery':
         if (user?.role === 'member' && user?.status !== 'approved') {
@@ -2131,6 +2152,9 @@ const App: React.FC = () => {
             ✕
           </button>
         </div>
+      )}
+      {user && activeTab !== 'login' && (
+        <UpcomingBookingsBanner bookings={userRegistrations} onViewBookings={() => { setOpenBookingHistory(true); setActiveTab('activities'); }} />
       )}
       {notification && (
         <div className="fixed top-24 right-8 z-[100] animate-slideIn">

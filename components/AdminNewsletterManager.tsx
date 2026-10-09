@@ -179,6 +179,7 @@ export const AdminNewsletterManager: React.FC = () => {
       const recipientEmails = subscribers.map(s => s.email);
 
       await addDoc(collection(db, 'mail'), {
+        createdAt: new Date().toISOString(),
         to: recipientEmails,
         message: {
           subject: `📩 free@last Monthly update: ${form.title}`,

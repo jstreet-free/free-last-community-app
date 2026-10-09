@@ -141,6 +141,7 @@ export const Home: React.FC<HomeProps> = ({
 
       // 2. Trigger actual email via 'mail' collection
       await addDoc(collection(db, 'mail'), {
+        createdAt: new Date().toISOString(),
         to: ['jstreet@freeatlast.co.uk', 'info@freeatlast.co.uk'],
         replyTo: inquiryForm.email,
         message: {

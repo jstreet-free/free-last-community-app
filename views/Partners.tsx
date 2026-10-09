@@ -46,6 +46,7 @@ export const Partners: React.FC<PartnersProps> = ({ assets, partners, impactStor
 
       // 2. Trigger actual email
       await addDoc(collection(db, 'mail'), {
+        createdAt: new Date().toISOString(),
         to: ['info@freeatlast.co.uk'],
         cc: ['jstreet@freeatlast.co.uk'],
         replyTo: partnerForm.email,

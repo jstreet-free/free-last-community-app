@@ -84,6 +84,7 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs, al
         const userRoleAndDept = `${user.role}${user.department ? ` - ${user.department}` : ''}`;
 
         await addDoc(collection(db, 'mail'), {
+          createdAt: new Date().toISOString(),
           to: ['jstreet@freeatlast.st', 'jstreet@freeatlast.co.uk', 'info@freeatlast.co.uk'],
           message: {
             subject: `URGENT: Negative Wellbeing Log from ${userName}`,
@@ -169,6 +170,7 @@ export const MemberWellbeing: React.FC<MemberWellbeingProps> = ({ user, logs, al
       if (targetEmail && targetEmail.includes('@') && targetEmail !== 'Not provided') {
         try {
           await addDoc(collection(db, 'mail'), {
+            createdAt: new Date().toISOString(),
             to: targetEmail,
             message: {
               subject: `free@last Support & Care Response`,
